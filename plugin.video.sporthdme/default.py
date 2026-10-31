@@ -995,6 +995,11 @@ def site_events_menu(key):
         shown += 1
     if events and not shown:
         control.infoDialog(u"[COLOR gold]Aucune source française parmi les matchs de ce site.[/COLOR]", NAME, ICON, 6000)
+    if not events and key.startswith('vavoo'):
+        control.infoDialog(
+            u'[COLOR red]Vavoo est momentanément inaccessible '
+            u'(connexion ou serveur). Réessayez plus tard.[/COLOR]',
+            NAME, ICON, 6000)
     xbmcplugin.setContent(_handle, 'movies')
     xbmcplugin.endOfDirectory(_handle)
 

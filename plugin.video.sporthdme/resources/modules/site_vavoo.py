@@ -11,16 +11,22 @@ generic "Serveur N" and every channel is French by definition -- the
 How it works (reverse-engineered from the current plugin.video.vavooto
 2026.10.29.1, michaz1988's repo, and verified live):
 
-  1. auth signature : POST https://www.vypn.net/api/app/ping with an
-     "app-focus" device payload -> JSON {"sig": "<base64 envelope>"}
-     whose decoded payload carries a validUntil (ms). The signature is
-     passed to Vavoo in the "mediahubmx-signature" header.
-  2. catalog        : POST https://vavoo.to/mediahubmx-catalog.json
+  1. catalog        : POST https://vavoo.to/mediahubmx-catalog.json
      with filter {"group": <group>} and cursor pagination -> items
      {name, url ("https://vavoo.to/vavoo-iptv/play/<id>"), group, logo}.
+     Asked WITHOUT a signature first: vavoo.to currently answers
+     anonymously, and requiring the vypn.net ping for listing made the
+     two lists empty on boxes where that host is unreachable (ISP/DNS
+     blocks). A signed request is kept as a fallback in case the
+     anonymous access gets re-restricted.
+  2. auth signature : POST https://www.vypn.net/api/app/ping with an
+     "app-focus" device payload -> JSON {"sig": "<base64 envelope>"}
+     whose decoded payload carries a validUntil (ms). The signature is
+     passed to Vavoo in the "mediahubmx-signature" header. OPTIONAL:
+     only tried when the anonymous catalogue/resolve failed.
   3. playback       : POST https://vavoo.to/mediahubmx-resolve.json
      with {"url": <play link>} -> [{"url": "<session m3u8>"}] played
-     with User-Agent "MediaHubMX/2".
+     with User-Agent "MediaHubMX/2". Anonymous first, signed retry.
 
 The resolved m3u8 is a short-lived session URL, so resolve() is only
 called at play time (never at listing time). The signature and the
@@ -170,7 +176,10 @@ def sig_valid_until(signature):
             payload = json.loads(payload)
         if not isinstance(payload, dict):
             return 0
-        return int(payload.get('validUntil') or 0)
+        vu = int(payload.get('validUntil') or 0)
+        if 0 < vu < 100000000000:   # seconds -> milliseconds
+            vu *= 1000
+        return vu
     except Exception:
         return 0
 
@@ -212,16 +221,24 @@ def _cache_save(cache):
 
 # ---- network ----------------------------------------------------------------
 
-def _post_json(url, data, headers, timeout=15):
+def _post_json(url, data, headers, timeout=15, retries=1):
     import requests
     try:
         requests.packages.urllib3.disable_warnings()
     except Exception:
         pass
-    r = requests.post(url, json=data, headers=headers, timeout=timeout,
-                      verify=False)
-    r.raise_for_status()
-    return r.json()
+    last = None
+    for attempt in range(retries + 1):
+        try:
+            r = requests.post(url, json=data, headers=headers,
+                              timeout=timeout, verify=False)
+            r.raise_for_status()
+            return r.json()
+        except Exception as exc:
+            last = exc
+            if attempt < retries:
+                time.sleep(1.5)
+    raise last
 
 
 def _get_signature(force=False):
@@ -249,10 +266,16 @@ def _get_signature(force=False):
 
 
 def _catalog(sig, group):
-    """All catalog items of one group (cursor pagination)."""
+    """All catalog items of one group (cursor pagination).
+
+    sig may be '': the header is only sent when a signature is actually
+    available, so listing never depends on the vypn.net ping.
+    """
     headers = {'user-agent': UA, 'accept': 'application/json',
                'content-type': 'application/json; charset=utf-8',
-               'accept-encoding': 'gzip', 'mediahubmx-signature': sig}
+               'accept-encoding': 'gzip'}
+    if sig:
+        headers['mediahubmx-signature'] = sig
     data = {'language': 'de', 'region': 'AT', 'catalogId': 'iptv',
             'id': 'iptv', 'adult': False, 'search': '', 'sort': 'name',
             'filter': {'group': group}, 'cursor': 0,
@@ -267,20 +290,28 @@ def _catalog(sig, group):
 
 
 def _cached_channels(group):
-    """Channels of one group, cached VAVOO_CACHE_H hours (offline fallback)."""
+    """Channels of one group, cached VAVOO_CACHE_H hours (offline fallback).
+
+    Anonymous catalogue request first (vavoo.to answers without the
+    mediahubmx-signature); the signed request is only tried when the
+    anonymous one failed AND a signature is obtainable, so an
+    unreachable vypn.net can no longer empty the lists.
+    """
     cache = _cache_load()
     key = 'channels_' + group
     entry = cache.get(key) or {}
     if time.time() - entry.get('t', 0) < VAVOO_CACHE_H * 3600 \
             and entry.get('items'):
         return entry['items']
-    sig = _get_signature()
-    if not sig:
-        return entry.get('items') or []
-    try:
-        items = _catalog(sig, group)
-    except Exception:
-        return entry.get('items') or []
+    items = []
+    for attempt in range(2):
+        sig = '' if attempt == 0 else _get_signature()
+        try:
+            items = _catalog(sig, group)
+        except Exception:
+            items = []
+        if items:
+            break
     if not items:
         return entry.get('items') or []
     cache[key] = {'t': int(time.time()), 'items': items}
@@ -308,21 +339,20 @@ def _resolve(server_url):
 
     The m3u8 is short-lived, so this runs at play time only. Returns the
     m3u8 URL (site.UA = MediaHubMX/2 is sent by the player) or None.
-    Retries once with a refreshed signature.
+    Anonymous resolve first; if it fails, one more attempt with a
+    freshly refreshed signature (if the vypn.net ping answers).
     """
-    sig = _get_signature()
-    if not sig:
-        return None
-    for force in (False, True):
+    data = {'language': 'de', 'region': 'AT', 'url': server_url,
+            'clientVersion': '3.1.0'}
+    for attempt in range(2):
+        sig = '' if attempt == 0 else _get_signature(force=True)
+        headers = {'user-agent': UA,
+                   'content-type': 'application/json; charset=utf-8',
+                   'accept-encoding': 'gzip'}
+        if sig:
+            headers['mediahubmx-signature'] = sig
         try:
-            sig = _get_signature(force=force) if force else sig
-            headers = {'user-agent': UA,
-                       'content-type': 'application/json; charset=utf-8',
-                       'accept-encoding': 'gzip',
-                       'mediahubmx-signature': sig}
-            data = {'language': 'de', 'region': 'AT', 'url': server_url,
-                    'clientVersion': '3.1.0'}
-            j = _post_json(URL_RESOLVE, data, headers, timeout=15)
+            j = _post_json(URL_RESOLVE, data, headers, timeout=15, retries=1)
             if isinstance(j, list) and j and j[0].get('url'):
                 return j[0]['url']
         except Exception:
