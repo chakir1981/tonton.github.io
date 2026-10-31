@@ -41,7 +41,7 @@
         <platform>all</platform>
     </extension>
 </addon>
-	<addon id="plugin.video.sporthdme" name="SportHD" version="2.1.3" provider-name="chakir1981">
+	<addon id="plugin.video.sporthdme" name="SportHD" version="2.1.4" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -58,7 +58,14 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
-      [B]v2.1.3[/B] 01/11/2026
+      [B]v2.1.4[/B] 01/11/2026
+- Nouveauté : les matchs sans aucune source française reçoivent 3 liens de secours « Lien 1 / 2 / 3 » LiveWatch correspondant au match (Ligue1+, Canal+ Foot, DAZN Ligue 1, beIN, RMC…), avec des résolutions différentes quand le site les annonce (4K / FHD / HD). Les matchs déjà servis en français ne changent pas.
+- Ouverture rapide : dès l'affichage du menu du match, les 3 liens LiveWatch se préparent en arrière-plan (un seul ticket pour les trois) — au clic le lien démarre du cache, quasi instantanément ; sinon la préparation ne prend que ~4 s.
+- Ligue1+ (chaîne officielle de la LFP, flux 1 à 10) est désormais retrouvée : le rapprochement « Ligue 1+ » (grille TV) / « LIGUE1+ » (plateforme) est corrigé, les multiplex apparaissent pour tous les matchs de Ligue 1.
+- Fin des faux résultats dans les chaînes de dépannage : une émission sans contexte sportif qui cite juste une équipe (magazine de club, doc, immo…) n'est plus proposée comme « diffusion du match ».
+- Les multiplex (Ligue1+ 2, DAZN Ligue 1 Live 3…) sont proposés en plus quand plusieurs matchs de Ligue 1 se jouent en parallèle.
+- Préchauffage du catalogue LiveWatch en arrière-plan à l'ouverture des listes de matchs (cache 6 h) ; les liens n'apparaissent que lorsque le catalogue est prêt, jamais d'attente à l'affichage.
+- v2.1.3 : croisement avec les agendas Futbol Libre / Futbol Libre Mov — pour un match sans source française, les liens rapides de ces agendas (mêmes liens que leurs menus) sont proposés avant les chaînes Vavoo, avec le titre réel du match.
 - Pour les matchs sans source française (balise [Vavoo]) : l'add-on cherche maintenant le même match dans les agendas Futbol Libre / Futbol Libre Mov — quand il y est, les liens rapides (ceux des menus Futbol Libre) sont proposés EN PREMIER avec leurs serveurs, avant les chaînes Vavoo, car ils démarrent plus vite. Exemple : « Ajax vs AZ » propose directement les serveurs de Futbol Libre Mov et Futbol Libre.
 - Le titre de l'événement trouvé s'affiche tel quel (ligue + équipes) pour vérification ; jusqu'à 4 sources rapides par match, dédoublonnées, les listes avec le plus de serveurs d'abord.
 - Les agendas rapides sont préchargés en arrière-plan à l'ouverture des listes de matchs (cache 10 min) : le croisement est instantané au clic.

@@ -182,7 +182,8 @@ def _norm(s):
 _FALLBACK_RULES = (
     # compétitions françaises / européennes reprises par Canal+/DAZN/beIN
     (u'LIGUE 1|LIGUE 2|DOM TOM', (u'CANAL LIGUE 1', u'DAZN LIGUE 1',
-                                  u'LIGUE 1', u'BEIN SPORTS 1')),
+                                  u'LIGUE1', u'LIGUE 1', u'LIGUE1 2',
+                                  u'BEIN SPORTS 1')),
     (u'CHAMPIONS|EUROPA|CONFERENCE|UCL|UEL',
      (u'BEIN SPORTS 1', u'BEIN SPORTS 2', u'CANAL FOOT', u'CANAL SPORT',
       u'RMC SPORT 1')),
@@ -231,7 +232,8 @@ _FALLBACK_RULES = (
     # Nice peuvent aussi désigner un lieu de compétition d'un autre sport)
     (u'\\bPSG\\b|PARIS SG|PARIS SAINT|\\bMARSEILLE\\b|\\bOM\\b|\\bOL\\b|'
      u'\\bLYON\\b|\\bMONACO\\b|\\bLENS\\b|\\bLILLE\\b|\\bNICE\\b|\\bRENNES\\b',
-     (u'CANAL LIGUE 1', u'DAZN LIGUE 1', u'LIGUE 1', u'BEIN SPORTS 1')),
+     (u'CANAL LIGUE 1', u'DAZN LIGUE 1', u'LIGUE1', u'LIGUE 1',
+      u'LIGUE1 2', u'BEIN SPORTS 1')),
 )
 # aucun motif reconnu -> bouquets football/sport les plus larges
 _FOOT_DEFAULT = (u'BEIN SPORTS 1', u'CANAL FOOT', u'CANAL SPORT',
@@ -750,7 +752,26 @@ def _epg_load(wait=0.0):
 
 
 _EPG_ALIAS = {u'CANAL': u'CANAL PREMIERE', u'CANAL PLUS': u'CANAL PREMIERE'}
+# Ligue1+ (chaîne officielle de la LFP, flux 1 a 10) : la grille TV écrit
+# « Ligue 1+ 2 » alors que Vavoo nomme ses flux « LIGUE1+ 2 » — la
+# normalisation conserve l'espace différent, on fait le pont exactement.
+for _lw_i in (u'',) + tuple(u' {0}'.format(_n) for _n in range(1, 11)):
+    _EPG_ALIAS[u'LIGUE 1{0}'.format(_lw_i)] = u'LIGUE1{0}'.format(_lw_i)
 _EPG_QUALITY = (u'HD', u'FHD', u'UHD', u'SD', u'4K')
+
+# anti-bruit : une émission sans aucun contexte sportif qui ne cite qu'un
+# nom d'équipe (« Monacoscope », « sapeurs pompiers de Paris », « 100 %
+# immo »…) ne doit pas passer pour la diffusion du match. Les chaînes
+# 100 % sport sont admises sans mot-clé, les autres exigent un contexte
+# sportif dans le programme lui-même.
+_EPG_SPORT_CHAN_RE = re.compile(
+    u'BEIN|DAZN|CANAL[+\\s]*(SPORT|LIVE|FOOT|TOP 14|PREMIER)|'
+    u'EUROSPORT|LIGUE1|LIGUE 1|INFOSPORT|INFO SPORT|MULTISPORT|'
+    u"EQUIPE|FOOT\\+|\\bFOOT\\b|GOLF|EQUIDIA|RUGBY|TREK|LEAGUE", re.I)
+_EPG_SPORT_PROG_RE = re.compile(
+    u'FOOT|LIGUE|CHAMPION|COUPE|\\bCUP\\b|RUGBY|BASKET|TENNIS|MATCH|'
+    u'DIRECT|HANDBALL|VOLLEY|CYCLISME|FORMULE|MOTO|UFC|BOXE|NATIONS|'
+    u'AMICAL|QUALIFIC|SIX NATIONS|TOP 14', re.I)
 
 
 def _map_epg_channel(dn, vav_idx):
@@ -816,13 +837,27 @@ def _epg_channels(label, vav_idx, limit=6, epg_wait=0.0):
         s = _epg_score(title, desc, needles, comp_keys, st, sp, now)
         if not s:
             continue
+        # anti-bruit (voir _EPG_SPORT_CHAN_RE) : contexte sportif exigé
+        # pour les chaînes qui ne sont pas des chaînes de sport
+        dn = data['chan'].get(cid) or u''
+        if not _EPG_SPORT_CHAN_RE.search(dn) and not \
+                _EPG_SPORT_PROG_RE.search(u'{0} {1}'.format(title, desc)):
+            continue
         cur = hits.get(cid)
         if cur is None or s > cur[0]:
             hits[cid] = (s, st, sp, raw)
     ranked = sorted(hits.items(),
                     key=lambda kv: (-kv[1][0], abs(kv[1][1] - now)))
     out = []
+    # les résultats « faible score » (mots de compétition seulement :
+    # multiplex Ligue1+ 2..10, variantes 24/7) sont plafonnés pour laisser
+    # la place aux chaînes à correspondance d'équipes puis à l'heuristique
+    weak = 0
     for cid, (s, st, sp, raw) in ranked:
+        if s < 50:
+            if weak >= 3:
+                break
+            weak += 1
         ch = dict(chan_map[cid])
         ch['epg_start'] = int(st)
         ch['epg_stop'] = int(sp)
@@ -851,27 +886,38 @@ def fallback_channels(label, limit=6, epg_wait=EPG_WAIT_S):
     if not vav_idx:
         return []
     out, used = [], set()
-    try:
-        epg = _epg_channels(label, vav_idx, limit=limit, epg_wait=epg_wait)
-    except Exception:
-        epg = []
-    for ch in epg:
-        n = _norm(ch['title'])
-        if not n or n in used:
-            continue
-        out.append(ch)
-        used.add(n)
-        if len(out) >= limit:
-            break
-    if len(out) < limit:
-        for ch in _heuristic_channels(label, limit * 2):
+
+    def _push(pool):
+        for ch in pool:
             n = _norm(ch['title'])
             if not n or n in used:
                 continue
             out.append(ch)
             used.add(n)
             if len(out) >= limit:
-                break
+                return True
+        return False
+
+    try:
+        epg = _epg_channels(label, vav_idx, limit=limit, epg_wait=epg_wait)
+    except Exception:
+        epg = []
+    # ordre final : 1) programmes de la grille qui citent vraiment les
+    # équipes (score fort) ; 2) heuristique bouquets probables ; 3) les
+    # résultats « compétition seulement » de la grille (multiplex Ligue1+
+    # 2..10, variantes 24/7) en complément — utile notamment quand deux
+    # matchs de Ligue 1 sont diffusés en parallèle.
+    strong = [ch for ch in epg if (ch.get('epg_score') or 0) >= 50]
+    weak = [ch for ch in epg if (ch.get('epg_score') or 0) < 50]
+    if _push(strong) or len(out) >= limit:
+        return out
+    if len(out) < limit:
+        try:
+            _push(_heuristic_channels(label, limit * 2))
+        except Exception:
+            pass
+    if len(out) < limit:
+        _push(weak)
     return out
 
 

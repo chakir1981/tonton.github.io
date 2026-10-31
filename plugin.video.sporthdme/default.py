@@ -19,6 +19,7 @@ from resources.modules import site_embedlivesports
 from resources.modules import site_futbollibre
 from resources.modules import site_futbolmov
 from resources.modules import site_vavoo
+from resources.modules import site_livewatch
 import time
 from dateutil.parser import parse
 from dateutil.tz import gettz
@@ -30,6 +31,13 @@ from dateutil import parser, tz
 # ÉVÉNEMENTS EN DIRECT and Événements en direct (see Live_fallback_url).
 EXTRA_SITES = [site_embedlivesports, site_futbollibre]
 SITES = {s.KEY: s for s in EXTRA_SITES}
+# LiveWatch n'est pas une rubrique du menu : c'est la porte de secours
+# pour les matchs SANS AUCUNE source française (3 liens « Lien 1/2/3 »
+# à résolutions différentes quand le site l'annonce, pré-résolus en
+# arrière-plan pour s'ouvrir vite). Les chaînes françaises utilisées
+# sont les mêmes que celles du moteur Vavoo. Registré ici uniquement
+# pour que site_play puisse appeler son resolve().
+SITES[site_livewatch.KEY] = site_livewatch
 # futbol-libre.mov: one main-menu entry -> its three lists (fmov_menu)
 SITES.update((s.KEY, s) for s in site_futbolmov.SUBSITES)
 # Vavoo French channels: one main-menu entry -> its two lists (vavoo_menu)
@@ -145,6 +153,7 @@ def get_events(url):  # 5
     # source française s'afficheront sans attente au clic.
     try:
         site_vavoo.warmup()
+        site_livewatch.warmup()
         _agenda_warm()
     except Exception:
         pass
@@ -1212,10 +1221,12 @@ def addDir(name, url, mode, iconimage, description, isFolder=True, infoLabels=No
 
 
 def site_events_menu(key):
-    # préchauffage Vavoo (catalogue + grille TV) et agendas rapides en
-    # arrière-plan pour des sources de dépannage instantanées au clic
+    # préchauffage Vavoo (catalogue + grille TV), LiveWatch et agendas
+    # rapides en arrière-plan pour des sources de dépannage instantanées
+    # au clic
     try:
         site_vavoo.warmup()
+        site_livewatch.warmup()
         _agenda_warm()
     except Exception:
         pass
@@ -1380,6 +1391,74 @@ def fmov_search():
     xbmcplugin.endOfDirectory(_handle)
 
 
+_QUAL_RES = {'4K': u'2160p', 'FHD': u'1080p', 'HD': u'720p', 'SD': u'576p'}
+
+
+def _add_livewatch_links(title, poster=ICON):
+    """Ajoute 3 liens « Lien 1 / 2 / 3 » via LiveWatch pour un match
+    sans source française.
+
+    Ce sont les chaînes françaises correspondant au match (celles que le
+    moteur Vavoo aurait choisies : LIGUE1+, CANAL+ FOOT, DAZN LIGUE 1
+    LIVE...) servies par la porte livewatch.icu. Chaque lien porte la
+    résolution annoncée par le site (4K/FHD/HD) quand elle existe, et le
+    moteur de sélection essaie de donner 3 RÉSOLUTIONS DIFFÉRENTES.
+    Les liens sont pré-résolus en arrière-plan dès l'affichage (un seul
+    ticket pour les trois) : au clic, ouverture quasi instantanée.
+    Rien n'est ajouté si le catalogue LiveWatch n'est pas encore prêt
+    (jamais d'attente à l'affichage ; il le sera au prochain menu).
+    """
+    try:
+        if not site_livewatch.is_warm():
+            site_livewatch.warmup()
+            return 0
+        chans = site_vavoo.fallback_channels(title)
+    except Exception as exc:
+        log_info('livewatch backup failed: {0!r}'.format(exc))
+        return 0
+    if not chans:
+        return 0
+    links = site_livewatch.backup_links(chans, limit=3)
+    if not links:
+        return 0
+    # ouverture rapide : les 3 liens partent en pré-résolution tout de suite
+    site_livewatch.prewarm(links)
+    added = 0
+    for ch in links:
+        try:
+            payload = json.dumps({'k': site_livewatch.KEY,
+                                  'u': u'lw://{0}'.format(ch['id']),
+                                  'alt': [u'lw://{0}'.format(i)
+                                          for i in ch['ids']
+                                          if i != ch['id']],
+                                  't': title, 'p': poster})
+            qual = ch.get('quality') or ''
+            res = _QUAL_RES.get(qual)
+            if qual and res:
+                qtxt = u'Qualité annoncée : {0} (~{1}).'.format(qual, res)
+            elif qual:
+                qtxt = u'Qualité annoncée : {0}.'.format(qual)
+            else:
+                qtxt = u'Qualité non annoncée par le site.'
+            info = {'title': u'{0} | Lien {1} — {2} (LiveWatch)'.format(
+                        title, added + 1, ch['title']),
+                    'plot': u'{0} — {1} via LiveWatch : 2e porte du même '
+                            u'gisement que Vavoo, plus lente à démarrer '
+                            u'(~3 s). À essayer si un serveur Vavoo '
+                            u'échoue. {2}'.format(title, ch['title'], qtxt)}
+            label = u'[B]Lien {0}[/B]'.format(added + 1)
+            if ch['title']:
+                label += u' · {0}'.format(ch['title'])
+            if qual:
+                label += u' ({0})'.format(qual)
+            addDir(label, payload, 'site_play', poster, title,
+                   isFolder=False, infoLabels=info)
+            added += 1
+        except Exception as exc:
+            log_info('livewatch item failed: {0!r}'.format(exc))
+    return added
+
+
 def site_streams_menu(payload):
     d = json.loads(payload)
     poster = d.get('p') or ICON
@@ -1391,31 +1470,48 @@ def site_streams_menu(payload):
     fr_only = _french_only() and not d.get('nf') and not getattr(
         SITES.get(d['k']), 'NO_FR_FILTER', False)
     shown = 0
+    fr_shown = 0
     for sname, surl in d['s']:
         # server names carry accents too (e.g. "Señal 1") -- byte-str .format()
         # on a unicode arg raises UnicodeEncodeError in py2, so keep it unicode.
         sname = six.ensure_text(sname, encoding='utf-8', errors='replace')
-        if fr_only and not _is_french_source(sname, ''):
+        is_fr = _is_french_source(sname, '')
+        if is_fr:
+            fr_shown += 1
+        if fr_only and not is_fr:
             continue
         info = {'title': u'{0} | {1}'.format(title, sname), 'plot': title}
         addDir(u'[B]{0}[/B]'.format(sname),
                json.dumps({'k': d['k'], 'u': surl, 't': title, 'p': d.get('p', '')}),
                'site_play', poster, title, isFolder=False, infoLabels=info)
         shown += 1
-    if not shown:
-        # rattachement Vavoo : chaînes françaises de dépannage quand le
-        # match n'a aucun serveur français (jamais pour les sites Vavoo
-        # eux-mêmes, déjà français par définition)
-        fb = False
-        if not d['k'].startswith('vavoo'):
-            fb = _add_vavoo_fallback(title, poster)
-        if fb:
-            control.infoDialog(u'[COLOR gold]Aucune source française native — '
-                               u'sources de dépannage proposées '
-                               u'(rapides d\'abord, puis Vavoo).[/COLOR]',
-                               NAME, ICON, 6000)
-        else:
-            control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]", NAME, ICON, 6000)
+    # LiveWatch : réservé aux matchs SANS AUCUNE source française —
+    # « ce qui est déjà en français ne bouge pas ». 3 liens « Lien 1/2/3 »
+    # correspondant au match (mêmes chaînes que le moteur Vavoo, autres
+    # résolutions quand le site les annonce), pré-résolus en arrière-plan
+    # dès l'affichage pour s'ouvrir vite. Jamais pour les rubriques Vavoo
+    # (déjà des chaînes françaises) ni si le réglage de dépannage est coupé.
+    if not fr_shown and not d['k'].startswith('vavoo') and _vavoo_fallback():
+        lw_ok = False
+        try:
+            lw_ok = _add_livewatch_links(title, poster)
+        except Exception as exc:
+            log_info('livewatch backup menu failed: {0!r}'.format(exc))
+        if not shown:
+            if lw_ok:
+                control.infoDialog(
+                    u'[COLOR gold]Aucune source française native — '
+                    u'3 liens de secours LiveWatch proposés (ils se '
+                    u'préparent en arrière-plan).[/COLOR]', NAME, ICON, 6000)
+            elif _add_vavoo_fallback(title, poster):
+                # filet de sécurité si LiveWatch est indisponible
+                control.infoDialog(
+                    u'[COLOR gold]Aucune source française — chaînes Vavoo '
+                    u'de dépannage proposées.[/COLOR]', NAME, ICON, 6000)
+            else:
+                control.infoDialog(
+                    u"[COLOR gold]Aucune source française pour ce match.[/COLOR]",
+                    NAME, ICON, 6000)
     xbmcplugin.setContent(_handle, 'videos')
     xbmcplugin.endOfDirectory(_handle)
 
