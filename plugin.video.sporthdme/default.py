@@ -8,6 +8,7 @@ import six
 from six.moves.urllib.parse import urljoin, quote_plus, quote, unquote, parse_qsl, urlencode, urlparse
 from datetime import datetime, timedelta
 import json
+import threading
 import xbmc
 import xbmcaddon
 import xbmcgui
@@ -53,6 +54,12 @@ ART = ADDON_PATH + "/resources/icons/"
 
 BASEURL = 'https://one.sporthd.me/'  # 'https://sporthd.live/'  #'https://sportl.ivesoccer.sx/'
 Live_url = 'https://league.st'  # super.league.st died Sep 2026; bare league.st is back
+
+# Agendas « rapides » (Futbol Libre + Futbol Libre Mov) : les mêmes liens
+# que leurs menus, préchargés en arrière-plan et croisés avec les matchs
+# sans source française — proposés AVANT les chaînes Vavoo (plus rapides).
+AGENDA_TTL = 10 * 60.0
+_agenda_cache = {'ts': 0.0, 'events': [], 'thread': None}
 Live_fallback_url = 'https://tvsport.guide/proxy.php?source=index'  # same matches schema, JSON
 Alt_url = 'https://liveon.sx/program'  # 'https://1.livesoccer.sx/program'
 headers = {'User-Agent': client.agent(),
@@ -132,12 +139,13 @@ def _matches_from_page(url):
 
 
 def get_events(url):  # 5
-    # préchauffage Vavoo (catalogue + grille TV en arrière-plan) : pendant
-    # que l'utilisateur parcourt les matchs, les caches se remplissent et
-    # les chaînes de dépannage d'un match sans source française
-    # s'afficheront sans attente au clic (voir site_vavoo.warmup).
+    # préchauffage Vavoo (catalogue + grille TV en arrière-plan) et des
+    # agendas rapides : pendant que l'utilisateur parcourt les matchs, les
+    # caches se remplissent et les sources de dépannage d'un match sans
+    # source française s'afficheront sans attente au clic.
     try:
         site_vavoo.warmup()
+        _agenda_warm()
     except Exception:
         pass
     matches = None
@@ -341,22 +349,150 @@ def _clean_label(label):
         label or u'', encoding='utf-8', errors='replace')).strip()
 
 
+def _fast_agendas():
+    """Agenda consolidé fllibre + fmov (cache mémoire AGENDA_TTL)."""
+    now = time.time()
+    if _agenda_cache['events'] and now - _agenda_cache['ts'] < AGENDA_TTL:
+        return _agenda_cache['events']
+    events = []
+    for site in [site_futbollibre] + list(site_futbolmov.SUBSITES):
+        try:
+            for e in site.list_events():
+                e['_k'] = site.KEY
+                events.append(e)
+        except Exception as exc:
+            log_info('agenda {0} failed: {1!r}'.format(site.KEY, exc))
+    if events:
+        _agenda_cache['ts'] = now
+        _agenda_cache['events'] = events
+    return _agenda_cache['events']
+
+
+def _agenda_warm():
+    """Précharge les agendas rapides en arrière-plan (une fois à la fois)."""
+    try:
+        t = _agenda_cache['thread']
+        if t is not None and t.is_alive():
+            return
+    except Exception:
+        return
+
+    def _run():
+        try:
+            _fast_agendas()
+        except Exception:
+            pass
+
+    try:
+        th = threading.Thread(target=_run)
+        th.daemon = True
+        _agenda_cache['thread'] = th
+        th.start()
+    except Exception:
+        pass
+
+
+def _agenda_ready():
+    """True si les agendas rapides sont déjà en cache mémoire."""
+    try:
+        return bool(_agenda_cache['events']) \
+            and time.time() - _agenda_cache['ts'] < AGENDA_TTL
+    except Exception:
+        return False
+
+
+def _team_tokens(text):
+    """Mots significatifs d'un titre de match, pour le croisement.
+
+    Les accents sont repliés (ALAVÉS -> ALAVES, FRANÇAIS -> FRANCAIS)
+    pour que les titres espagnols/latins des agendas rapides rejoignent
+    les libellés anglais des événements.
+    """
+    try:
+        import unicodedata
+        txt = six.ensure_text(text or u'', encoding='utf-8',
+                              errors='replace').upper()
+        txt = unicodedata.normalize('NFKD', txt)
+        txt = u''.join(c for c in txt if not unicodedata.combining(c))
+    except Exception:
+        txt = six.ensure_text(text or u'', encoding='utf-8',
+                              errors='replace').upper()
+    txt = re.sub(r'[^A-Z0-9 ]', ' ', txt)
+    return set(w for w in txt.split()
+               if len(w) > 3 and w not in (u'VS', u'THE', u'LIVE',
+                                           u'STREAM', u'DIRECT', u'EN'))
+
+
+def _match_fast_events(title, limit=4):
+    """Événements des agendas rapides (fllibre/fmov) portant ce match.
+
+    Croisement par mots d'équipes : au moins 2 mots communs (ou l'unique
+    mot significatif). Le même match vu sur plusieurs sites ne garde que
+    la liste avec le plus de serveurs.
+    """
+    need = _team_tokens(title)
+    if not need:
+        return []
+    best = {}
+    for e in _fast_agendas():
+        shared = need & _team_tokens(e['title'])
+        if len(shared) < min(2, len(need)):
+            continue
+        key = e['title'].strip().lower()   # dédoublonnage inter-sites
+        cur = best.get(key)
+        if cur is None or len(e.get('servers') or []) > len(cur.get('servers') or []):
+            best[key] = e
+    out = sorted(best.values(),
+                 key=lambda e: -len(e.get('servers') or []))
+    return out[:limit]
+
+
 def _add_vavoo_fallback(match_label, poster=ICON):
-    """Propose les chaînes Vavoo françaises de dépannage pour un match
-    sans source française (choisies selon le sport/la compétition).
-    True si au moins une chaîne a été ajoutée à la liste."""
+    """Propose les sources de dépannage d'un match sans source française :
+    d'abord les liens rapides (agendas Futbol Libre / Futbol Libre Mov
+    qui portent le même match), puis les chaînes Vavoo françaises.
+    True si au moins une source a été ajoutée à la liste."""
     if not _vavoo_fallback():
         return False
     title = _clean_label(match_label)
     try:
-        warm = site_vavoo.is_warm()
+        warm = _agenda_ready() and site_vavoo.is_warm()
     except Exception:
-        warm = True
+        warm = False
     if not warm:
-        # catalogue ou grille TV pas encore prêts : dire à l'utilisateur
+        # agendas ou caches Vavoo pas encore prêts : dire à l'utilisateur
         # pourquoi la liste tarde un instant (normalement < quelques s)
-        Dialog.notification(NAME, u'[COLOR gold]Recherche de chaînes de dépannage…[/COLOR]',
+        Dialog.notification(NAME, u'[COLOR gold]Recherche de sources de dépannage…[/COLOR]',
                             ICON, 4000, False)
+    added = 0
+    # 1) sources rapides : le même match dans les agendas fllibre/fmov
+    try:
+        fast = _match_fast_events(title)
+    except Exception as exc:
+        log_info('fast agenda match failed: {0!r}'.format(exc))
+        fast = []
+    for e in fast:
+        try:
+            etitle = six.ensure_text(e['title'], encoding='utf-8', errors='replace')
+            servers = e.get('servers') or []
+            if not servers:
+                continue
+            payload = json.dumps({'k': e['_k'], 's': servers,
+                                  't': etitle, 'p': e.get('poster') or '',
+                                  'nf': 1})
+            label_ = u'[B][COLOR lime]{0}[/COLOR][/B] [COLOR gray]· rapide[/COLOR]'.format(etitle)
+            info = {'title': u'{0} | {1}'.format(title, etitle),
+                    'plot': u'{0} — source rapide « {1} » : {2} serveur(s) à '
+                            u'choisir. Mêmes liens que les menus Futbol '
+                            u'Libre / Futbol Libre Mov, proposés en premier '
+                            u'car plus rapides que Vavoo.'.format(
+                                title, etitle, len(servers))}
+            addDir(label_, payload, 'site_streams', e.get('poster') or poster,
+                   title, isFolder=True, infoLabels=info)
+            added += 1
+        except Exception as exc:
+            log_info('fast agenda item failed: {0!r}'.format(exc))
+    # 2) chaînes Vavoo françaises (moteur grille TV + heuristiques)
     try:
         chans = site_vavoo.fallback_channels(title)
     except Exception as e:
@@ -401,7 +537,7 @@ def _add_vavoo_fallback(match_label, poster=ICON):
         addDir(label_, payload, 'site_play',
                ch.get('logo') or poster, title, isFolder=False,
                infoLabels=info)
-    return bool(chans)
+    return bool(added or chans)
 
 
 # Les trois miroirs du service principal sont affichés discrètement
@@ -454,7 +590,8 @@ def get_stream(name, url):  # 4
         fb = _add_vavoo_fallback(name) if fr_only else False
         if fb:
             control.infoDialog(u'[COLOR gold]Aucune source française native — '
-                               u'chaînes Vavoo proposées en dépannage.[/COLOR]',
+                               u'sources de dépannage proposées '
+                               u'(rapides d\'abord, puis Vavoo).[/COLOR]',
                                NAME, ICON, 6000)
         elif fr_only:
             control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]\n"
@@ -1075,10 +1212,11 @@ def addDir(name, url, mode, iconimage, description, isFolder=True, infoLabels=No
 
 
 def site_events_menu(key):
-    # préchauffage Vavoo (catalogue + grille TV en arrière-plan) pour les
-    # chaînes de dépannage instantanées au clic sur un match (voir warmup)
+    # préchauffage Vavoo (catalogue + grille TV) et agendas rapides en
+    # arrière-plan pour des sources de dépannage instantanées au clic
     try:
         site_vavoo.warmup()
+        _agenda_warm()
     except Exception:
         pass
     site = SITES[key]
@@ -1247,8 +1385,10 @@ def site_streams_menu(payload):
     poster = d.get('p') or ICON
     title = d.get('t', '')
     # same NO_FR_FILTER exception as site_events_menu (Vavoo servers are
-    # generic "Serveur N" and French by definition)
-    fr_only = _french_only() and not getattr(
+    # generic "Serveur N" and French by definition); the 'nf' flag does
+    # the same for the fast fallback sources (fllibre/fmov) whose server
+    # names are generic too ("Server1 (sportiskas)", "Disney+ (tvf90)")
+    fr_only = _french_only() and not d.get('nf') and not getattr(
         SITES.get(d['k']), 'NO_FR_FILTER', False)
     shown = 0
     for sname, surl in d['s']:
@@ -1271,7 +1411,8 @@ def site_streams_menu(payload):
             fb = _add_vavoo_fallback(title, poster)
         if fb:
             control.infoDialog(u'[COLOR gold]Aucune source française native — '
-                               u'chaînes Vavoo proposées en dépannage.[/COLOR]',
+                               u'sources de dépannage proposées '
+                               u'(rapides d\'abord, puis Vavoo).[/COLOR]',
                                NAME, ICON, 6000)
         else:
             control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]", NAME, ICON, 6000)
