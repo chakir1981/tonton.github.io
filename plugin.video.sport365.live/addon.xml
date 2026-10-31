@@ -1,19 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <addon id="plugin.video.sport365.live" name="Sport365" version="2.6.10.1" provider-name="Bugatsinho">
     <requires>
-        <import addon="xbmc.python" version="2.1.0"/>
-        <import addon="script.module.requests" version="2.19.1"/>
-        <import addon="plugin.video.f4mTester" version="2.7.2"/>
-        <import addon="script.module.streamlink.base" version="2019.06.23"/>
-        <import addon="script.module.pyxbmct" version="1.2.0"/>
+        <import addon="xbmc.python" version="2.1.0" />
+        <import addon="script.module.requests" version="2.19.1" />
+        <import addon="plugin.video.f4mTester" version="2.7.2" />
+        <import addon="script.module.streamlink.base" version="2019.06.23" />
+        <import addon="script.module.pyxbmct" version="1.2.0" />
     </requires>
     <extension point="xbmc.python.pluginsource" library="main.py">
         <provides>video</provides>
     </extension>
   <extension point="xbmc.addon.metadata">
-    <summary lang="en">Sport365 originally made by GalAnonim</summary>
-    <description lang="en">Fork version 1.0 by GalAnonim!Kindly note that Sport365 Live is not an official part of the media player you are running, and therefore not to be mentioned within official support channels, this addon has nothing to do with the media player itself, nor it’s intended use, it is simply a third party plugin which has been added to your system.</description>
-    <disclaimer lang="en">Sport365 Live does not provide any streams of its own. Stream quality, content and copyright are responsibility of the ad-financed source web site.</disclaimer>
+    <summary lang="en">Sport365, créé à l'origine par GalAnonim</summary>
+    <description lang="en">Fork version 1.0 par GalAnonim ! Notez bien que Sport365 Live ne fait pas partie officielle du lecteur multimédia que vous utilisez et ne doit donc pas être mentionné sur les canaux d'assistance officiels ; cet add-on n'a rien à voir avec le lecteur multimédia lui-même ni avec son usage prévu : il s'agit simplement d'un plugin tiers ajouté à votre système.</description>
+    <disclaimer lang="en">Sport365 Live ne fournit aucun flux en propre. La qualité des flux, les contenus et les droits d'auteur relèvent de la responsabilité du site source financé par la publicité.</disclaimer>
     <language>en</language>
     <platform>all</platform>
     <license>GNU GENERAL PUBLIC LICENSE. Version 2, June 1991</license>
@@ -24,6 +24,6 @@
     <fanart>fanart.png</fanart>
   </assets>
   <news>2.6.10 18-01-2020
-- Just fix regex issues.Streams could not play!</news>
+- Simple correction de problèmes de regex. Les flux ne pouvaient pas se lire !</news>
   </extension>
 </addon>

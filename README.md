@@ -1,49 +1,55 @@
-**Welcome to Bugatsinho's Repository**
+**Bienvenue dans le dépôt de Bugatsinho**
 
 ![](images/bug.png)
 
-Here you can find my 3rd party add-ons and repository for Kodi!
+Vous trouverez ici mes add-ons tiers ainsi que mon dépôt pour Kodi !
 
-Feel free to open an issue if something wrong with them!
+N'hésitez pas à ouvrir une issue si quelque chose ne fonctionne pas !
 
-You can buy me a ☕ or 🍺 https://pastebin.com/raw/9J1KGKsj
+Vous pouvez m'offrir un ☕ ou une 🍺 : https://pastebin.com/raw/9J1KGKsj
 
-[Follow me on Twitter](https://twitter.com/bugatsinho)
+[Suivez-moi sur Twitter](https://twitter.com/bugatsinho)
 
-[Join us in Telegram](http://bit.ly/bug_telegram)
+[Rejoignez-nous sur Telegram](http://bit.ly/bug_telegram)
 
-[Repository v2.8](https://github.com/bugatsinho/bugatsinho.github.io/blob/master/repository.bugatsinho-2.8.zip?raw=true)
+[Télécharger le dépôt v2.9](https://raw.githubusercontent.com/chakir1981/tonton.github.io/master/repository.bugatsinho-2.9.zip)
 
-[Register to Real Debrid](http://real-debrid.com/?id=1168800)
+[S'inscrire sur Real Debrid](http://real-debrid.com/?id=1168800)
 
+**ADD-ONS :**
 
-**ADD-ONS:**
+![](images/sporthd.png)
 
-![](images/sporthd.png)       
-[**SportHD source code**](https://github.com/bugatsinho/bugatsinho.github.io/tree/master/plugin.video.sporthdme) 
+[**Code source de SportHD**](https://github.com/bugatsinho/bugatsinho.github.io/tree/master/plugin.video.sporthdme)
 
-![](images/rlsBB.png)       
-[**ReleaseBB source code**](https://github.com/bugatsinho/bugatsinho.github.io/tree/master/plugin.video.releaseBB) 
+![](images/rlsBB.png)
 
-![](images/hub.png)       
-[**Release Hub source code**](https://github.com/bugatsinho/bugatsinho.github.io/tree/master/plugin.video.rlshub) 
+[**Code source de ReleaseBB**](https://github.com/bugatsinho/bugatsinho.github.io/tree/master/plugin.video.releaseBB)
 
-![](images/cgr.png)       
-[**CartoonsGR source code**](https://github.com/bugatsinho/bugatsinho.github.io/tree/master/plugin.video.cartoonsgr)
+![](images/hub.png)
 
-![](images/sub.png)     
-[**GreekSubs source code**](https://github.com/bugatsinho/bugatsinho.github.io/tree/master/service.subtitles.greeksubs) 
+[**Code source de Release Hub**](https://github.com/bugatsinho/bugatsinho.github.io/tree/master/plugin.video.rlshub)
 
-![](images/nov.png)     
-[**iNovelas source code**](https://github.com/bugatsinho/bugatsinho.github.io/tree/master/plugin.video.iNovelas)
+![](images/cgr.png)
 
-![](images/pel.png)  
-[**Pelisplus TV source code**](https://github.com/bugatsinho/bugatsinho.github.io/tree/master/plugin.video.pelisplus)
+[**Code source de CartoonsGR**](https://github.com/bugatsinho/bugatsinho.github.io/tree/master/plugin.video.cartoonsgr)
 
+![](images/sub.png)
 
-![](images/sky.png)     
-[**SkylineCCTV source code**](https://github.com/bugatsinho/bugatsinho.github.io/tree/master/plugin.video.skylinecctv)
+[**Code source de GreekSubs**](https://github.com/bugatsinho/bugatsinho.github.io/tree/master/service.subtitles.greeksubs)
 
+![](images/nov.png)
 
-![](images/fvl.png)       
-[**Free Video Lectures source code**](https://github.com/bugatsinho/bugatsinho.github.io/tree/master/plugin.video.freevl)
+[**Code source de iNovelas**](https://github.com/bugatsinho/bugatsinho.github.io/tree/master/plugin.video.iNovelas)
+
+![](images/pel.png)
+
+[**Code source de Pelisplus TV**](https://github.com/bugatsinho/bugatsinho.github.io/tree/master/plugin.video.pelisplus)
+
+![](images/sky.png)
+
+[**Code source de SkylineCCTV**](https://github.com/bugatsinho/bugatsinho.github.io/tree/master/plugin.video.skylinecctv)
+
+![](images/fvl.png)
+
+[**Code source de Free Video Lectures**](https://github.com/bugatsinho/bugatsinho.github.io/tree/master/plugin.video.freevl)

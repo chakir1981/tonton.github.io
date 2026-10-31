@@ -1,7 +1,5 @@
-title: Bugatsinho's Repository
+title: Dépôt Bugatsinho
 author: bugatsinho
 twitter_username: https://twitter.com/bugatsinho
-
-show_excerpts: false # set to false to remove excerpts on the homepage
-
+show_excerpts: false # mettre à false pour masquer les extraits sur la page d'accueil
 theme: jekyll-theme-cayman

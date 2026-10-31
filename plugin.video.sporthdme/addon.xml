@@ -4,22 +4,22 @@
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
     <import addon="script.module.six" />
-    <import addon="script.module.requests" version="2.19.1"/>
+    <import addon="script.module.requests" version="2.19.1" />
   </requires>
   <extension point="xbmc.python.pluginsource" library="default.py">
     <provides>video</provides>
   </extension>
   <extension point="xbmc.addon.metadata">
-    <summary lang="en">SportHD by Bugatsinho</summary>
-    <description lang="en">Sport Streams from SportHD.me</description>
-    <disclaimer lang="en">All the streams on this add-on are hosted on the third party site and uploaded by other people. We are not responsible for any content that hosted on on the third-party sites. If you have any legal issues please contact appropriate video owners hosters.</disclaimer>
+    <summary lang="en">SportHD par Bugatsinho</summary>
+    <description lang="en">Flux sportifs de SportHD.me</description>
+    <disclaimer lang="en">Tous les flux de cet add-on sont hébergés sur des sites tiers et mis en ligne par d'autres personnes. Nous ne sommes pas responsables des contenus hébergés sur ces sites tiers. En cas de problème juridique, veuillez contacter les propriétaires/hébergeurs vidéo concernés.</disclaimer>
 	  <language>EN</language>
     <license>GNU GPL, version 2</license>
     <twitter>https://twitter.com/Bugatsinho</twitter>
     <news>
       [B]v0.1.91[/B] 04/10/2026
-      - New: Futbol Libre MOV (futbol-libre.mov) with triple menu: Latino, USA, Football Live + Search
-      - Futbol Libre / tarjetarojita: streams play again (correct Referer/Origin for the player CDN)
+- Nouveau : Futbol Libre MOV (futbol-libre.mov) avec triple menu : Latino, USA, Football Live + Recherche
+- Futbol Libre / tarjetarojita : les flux se lisent à nouveau (Referer/Origin corrects pour le CDN du lecteur)
     </news>
 
     <assets>

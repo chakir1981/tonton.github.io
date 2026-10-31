@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <addon id="plugin.video.pelisplus" name="PelisPlus TV" version="0.1.11" provider-name="Bugatsinho">
   <requires>
-    <import addon="xbmc.python" version="2.1.0"/>
-    <import addon="script.module.resolveurl" version="5.0.00"/>
-    <import addon="script.module.requests" version="2.19.1"/>
+    <import addon="xbmc.python" version="2.1.0" />
+    <import addon="script.module.resolveurl" version="5.0.00" />
+    <import addon="script.module.requests" version="2.19.1" />
   </requires>
   <extension point="xbmc.python.pluginsource" library="default.py">
 		<provides>video</provides>
@@ -16,16 +16,15 @@
     <disclaimer lang="es">El autor de Pelisplus TV no aloja, transmite ni distribuye el contenido que se muestra dentro de este complemento y no
     tener alguna relación con el sitio web o el autor del sitio web.
     </disclaimer>
-    <summary lang="en">PelisPlus TV Content from peliplus tv (Spanish-Latino) website</summary>
-    <description lang="en">Content from peliplus tv (Spanish-Latino) website</description>
-    <disclaimer lang="en">The Pelisplus TV's author  does not host, stream or distribute any of the content displayed inside this plugin and does not
-    have any relation with the website or the website's author.
+    <summary lang="en">PelisPlus TV : contenus du site pelisplus tv (espagnol latino)</summary>
+    <description lang="en">Contenus du site pelisplus tv (espagnol latino)</description>
+    <disclaimer lang="en">L'auteur de Pelisplus TV n'héberge, ne diffuse ni ne distribue aucun des contenus affichés dans cet add-on et n'entretient aucun lien avec le site web ni avec son auteur.
     </disclaimer>
     <language>en es</language>
     <license>GNU GPL, version 2</license>
     <twitter>https://twitter.com/Bugatsinho</twitter>
     <news>[0.1.10] 03/01/2020
-- change domain url
+- changement de l'URL du domaine
     </news>
   </extension>
 </addon>

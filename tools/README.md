@@ -1,95 +1,96 @@
-# Maintenance tools
+# Outils de maintenance
 
-Scripts that help update and release the addons in this repository.
-All scripts use only the Python 3 standard library (no `pip install` needed).
+Scripts facilitant la mise à jour et la publication des add-ons de ce dépôt.
+Tous les scripts utilisent uniquement la bibliothèque standard Python 3 (aucun `pip install` nécessaire).
 
 ## release.py
 
-Bumps version, builds zip, updates root `addons.xml`, refreshes
-`addons.xml.md5`, copies assets to `_zips/<addon-id>/`. Works for any addon
-in the repo.
+Incrémente la version, construit le zip, met à jour le fichier `addons.xml` à la racine,
+régénère `addons.xml.md5`, copie les ressources dans `_zips/<id-de-l-addon>`. Fonctionne pour
+n'importe quel add-on du dépôt.
 
 ```bash
-# Dry run first (recommended)
+# Simulation d'abord (recommandé)
 python3 tools/release.py --addon plugin.video.sporthdme --version 0.1.85 --dry-run
 
-# Real release
+# Publication réelle
 python3 tools/release.py --addon plugin.video.sporthdme --version 0.1.85
 
-# With news entry
+# Avec une entrée de journal (news)
 python3 tools/release.py --addon plugin.video.sporthdme --version 0.1.85 \
     --news "- fix Live_url to super.league.st\n- update s2watch resolver"
 
-# Just refresh the md5 file (after a manual edit of addons.xml)
+# Simplement régénérer le fichier md5 (après une modification manuelle de addons.xml)
 python3 tools/release.py --refresh-md5
 ```
 
-The script does **not** commit. It prints suggested git commands at the end.
+Le script **ne commit pas**. Il affiche les commandes git suggérées à la fin.
 
-### Bash wrapper
+### Wrapper Bash
 
 ```bash
 ./tools/release.sh plugin.video.sporthdme 0.1.85
-./tools/release.sh plugin.video.sporthdme 0.1.85 "- changelog line 1\n- line 2"
+./tools/release.sh plugin.video.sporthdme 0.1.85 "- ligne de journal 1\n- ligne 2"
 ./tools/release.sh plugin.video.sporthdme 0.1.85 --dry-run
 ```
 
 ## diagnose.py
 
-Live HTTP probes against the upstream sites used by `plugin.video.sporthdme`.
-Reports which scraping/resolver patterns still match. Use it before and after
-fixing things.
+Sondages HTTP en direct contre les sites amont utilisés par `plugin.video.sporthdme`.
+Signale quels motifs de scraping/résolution fonctionnent encore. À utiliser avant et
+après les corrections.
 
 ```bash
-# Hit super.league.st/events and check both event-extraction regexes
+# Interroger super.league.st/events et vérifier les deux regex d'extraction d'événements
 python3 tools/diagnose.py events
 
-# Hit one.sporthd.me tRPC endpoint for the 24/7 channels list
+# Interroger le point d'accès tRPC de one.sporthd.me pour la liste des chaînes 24/7
 python3 tools/diagnose.py channels
 
-# Probe an individual stream URL and see which player signature matches
+# Tester une URL de flux individuelle et voir quelle signature de lecteur correspond
 python3 tools/diagnose.py resolve "https://example.host/embed/stream-1"
 
-# Both events + channels in one run
+# Événements + chaînes en une seule exécution
 python3 tools/diagnose.py all
 
-# Override defaults
+# Remplacer les valeurs par défaut
 python3 tools/diagnose.py events --live-url https://super.league.st
 python3 tools/diagnose.py channels --base-url https://one.sporthd.me/
 ```
 
-When the events page can't be parsed, the body is dumped to
-`/tmp/sporthd_events_body.html` so you can inspect what changed.
+Lorsque la page des événements ne peut pas être analysée, son contenu est enregistré dans
+`/tmp/sporthd_events_body.html` afin que vous puissiez examiner ce qui a changé.
 
-## CI release (GitHub Actions)
+## Publication CI (GitHub Actions)
 
-`.github/workflows/release.yml` runs the same `release.py` flow in CI. Two
-trigger options:
+`.github/workflows/release.yml` exécute le même flux que `release.py` en CI. Deux
+options de déclenchement :
 
-1. **Push a tag** like `plugin.video.sporthdme-0.1.85`:
+1. **Pousser un tag** comme `plugin.video.sporthdme-0.1.85` :
 
    ```bash
    git tag plugin.video.sporthdme-0.1.85
    git push origin plugin.video.sporthdme-0.1.85
    ```
 
-   The workflow parses the tag, runs the release pipeline, commits the
-   updated files back to `master`, and uploads the new zip as a
-   GitHub Release asset.
+   Le workflow analyse le tag, exécute le pipeline de publication, committe les
+   fichiers mis à jour vers `master` et téléverse le nouveau zip comme
+   asset d'une GitHub Release.
 
-2. **Manual dispatch** from the Actions tab: pick the addon id, version,
-   and optional news text.
+2. **Déclenchement manuel** depuis l'onglet Actions : choisissez l'id de l'add-on,
+   la version et éventuellement le texte du journal.
 
-For a strictly-local workflow (e.g. you don't want CI to push commits),
-just keep using `tools/release.py` and commit/push yourself.
+Pour un fonctionnement strictement local (par exemple si vous ne voulez pas que la CI
+pousse des commits), continuez simplement à utiliser `tools/release.py` et faites
+vous-même le commit/push.
 
-## Typical maintenance loop for `plugin.video.sporthdme`
+## Cycle de maintenance type pour `plugin.video.sporthdme`
 
-1. `python3 tools/diagnose.py all` to see what the upstream looks like today.
-2. Patch `plugin.video.sporthdme/default.py` (or modules under `resources/`).
-3. `python3 tools/diagnose.py events` again to confirm the parser still
-   accepts the live HTML.
-4. Probe a few stream URLs with `python3 tools/diagnose.py resolve <url>`
-   to catch broken resolvers.
-5. `python3 tools/release.py --addon plugin.video.sporthdme --version <next>`.
-6. Review with `git diff` and push.
+1. `python3 tools/diagnose.py all` pour voir l'état actuel des sites amont.
+2. Corriger `plugin.video.sporthdme/default.py` (ou les modules sous `resources/`).
+3. Relancer `python3 tools/diagnose.py events` pour confirmer que l'analyseur
+   accepte toujours le HTML en ligne.
+4. Tester quelques URL de flux avec `python3 tools/diagnose.py resolve <url>`
+   pour détecter les résolveurs cassés.
+5. `python3 tools/release.py --addon plugin.video.sporthdme --version <suivante>`.
+6. Vérifier avec `git diff` et pousser.

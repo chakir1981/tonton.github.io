@@ -1,21 +1,21 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <addon id="plugin.video.iNovelas" name="iNovelas" version="0.1.10" provider-name="Bugatsinho">
   <requires>
-    <import addon="xbmc.python" version="2.1.0"/>
-    <import addon="script.module.resolveurl" version="5.0.00"/>
+    <import addon="xbmc.python" version="2.1.0" />
+    <import addon="script.module.resolveurl" version="5.0.00" />
   </requires>
   <extension point="xbmc.python.pluginsource" library="default.py">
     <provides>video</provides>
   </extension>
   <extension point="xbmc.addon.metadata">
-    <summary lang="en">iNovelas es un add-on con telenovelas latinas.</summary>
-    <description lang="en">Enlaces gratis desde web para ver sus Telenovelas favoritas!</description>
-	<disclaimer lang="en">El autor no aloja ni distribuye ninguno de los contenidos mostrados por este complemento o tiene alguna afiliación con los propietarios del sitio web</disclaimer>
+    <summary lang="en">iNovelas : un add-on de télénovelas latino-américaines.</summary>
+    <description lang="en">Liens gratuits depuis le web pour regarder vos télénovelas préférées !</description>
+	<disclaimer lang="en">L'auteur n'héberge ni ne distribue aucun des contenus affichés par cet add-on et n'a aucune affiliation avec les propriétaires du site web.</disclaimer>
 	<language>en es</language>
     <license>GNU GPL, version 2</license>
     <twitter>https://twitter.com/Bugatsinho</twitter>
     <news>version 0.1.10 04-04-2019
- - Reparar openload resolver
+- Correction du résolveur openload
     </news>
   </extension>
 </addon>
