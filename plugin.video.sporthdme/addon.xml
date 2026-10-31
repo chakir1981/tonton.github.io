@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="2.0.2" provider-name="Bugatsinho">
+<addon id="plugin.video.sporthdme" name="SportHD" version="2.0.3" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -10,15 +10,15 @@
     <provides>video</provides>
   </extension>
   <extension point="xbmc.addon.metadata">
-    <summary lang="en">SportHD par Bugatsinho</summary>
+    <summary lang="en">SportHD par chakir1981</summary>
     <description lang="en">Flux sportifs de SportHD.me</description>
     <disclaimer lang="en">Tous les flux de cet add-on sont hébergés sur des sites tiers et mis en ligne par d'autres personnes. Nous ne sommes pas responsables des contenus hébergés sur ces sites tiers. En cas de problème juridique, veuillez contacter les propriétaires/hébergeurs vidéo concernés.</disclaimer>
           <language>EN</language>
     <license>GNU GPL, version 2</license>
-    <twitter>https://twitter.com/Bugatsinho</twitter>
     <news>
-      [B]v2.0.2[/B] 01/11/2026
-- Correction d'affichage : chez les utilisateurs qui avaient déjà l'add-on, Kodi gardait l'ancien logo et l'ancien fanart (cache d'images de Kodi). Les fichiers d'images sont renommés (icon2.png / fanart2.jpg) : Kodi recharge maintenant le nouveau logo et le nouveau fanart partout, sans aucune manipulation.
+      [B]v2.0.3[/B] 01/11/2026
+- L'add-on est maintenant publié au nom de chakir1981.
+- v2.0.2 : correction du cache d'images de Kodi — les fichiers d'images sont renommés (icon2.png / fanart2.jpg) pour que le nouveau logo et le nouveau fanart s'affichent partout.
 - v2.0.1 : retour au menu classique (Événements en direct + sites annexes) ; réglage « Uniquement les sources françaises » dans les paramètres (activé par défaut) ; serveurs affichés « un », « deux », « trois ».
     </news>
 

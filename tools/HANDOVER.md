@@ -8,8 +8,8 @@
 
 ## TL;DR
 
-The user is **bugatsinho**, maintainer of a Kodi repository at
-`/Users/elianaalfaro/PycharmProjects/bugatsinho.github.io`. They want help keeping
+The user is **chakir1981**, maintainer of a Kodi repository at
+`/Users/elianaalfaro/PycharmProjects/tonton.github.io`. They want help keeping
 **`plugin.video.sporthdme`** working, especially the resolvers, since the
 upstream sites rotate domains and player implementations on a regular cadence.
 
@@ -41,7 +41,7 @@ Kodi 18 still ships Python 2.
 ## Current state of the repo
 
 ```
-bugatsinho.github.io/
+tonton.github.io/
 ├── addons.xml                 # hand-maintained manifest (do NOT regenerate
 │                              # from scratch -- surgically update only the
 │                              # <addon id="..."> block being released)
@@ -150,8 +150,8 @@ bugatsinho.github.io/
 
 ## Resume prompt (paste this verbatim to a fresh LLM)
 
-> I'm bugatsinho, maintainer of a Kodi repository at
-> `/Users/elianaalfaro/PycharmProjects/bugatsinho.github.io`. I'm picking up
+> I'm chakir1981, maintainer of a Kodi repository at
+> `/Users/elianaalfaro/PycharmProjects/tonton.github.io`. I'm picking up
 > a maintenance task on `plugin.video.sporthdme` that another agent
 > was working on. Please **read `tools/HANDOVER.md`** in the repo first — it has
 > the full state of where we are and what works. The critical resolver bug (403 Forbidden)

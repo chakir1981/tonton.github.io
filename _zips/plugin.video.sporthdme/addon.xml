@@ -1,30 +1,30 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="0.1.91" provider-name="Bugatsinho">
+<addon id="plugin.video.sporthdme" name="SportHD" version="2.0.3" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
     <import addon="script.module.six" />
-    <import addon="script.module.requests" version="2.19.1"/>
+    <import addon="script.module.requests" version="2.19.1" />
   </requires>
   <extension point="xbmc.python.pluginsource" library="default.py">
     <provides>video</provides>
   </extension>
   <extension point="xbmc.addon.metadata">
-    <summary lang="en">SportHD by Bugatsinho</summary>
-    <description lang="en">Sport Streams from SportHD.me</description>
-    <disclaimer lang="en">All the streams on this add-on are hosted on the third party site and uploaded by other people. We are not responsible for any content that hosted on on the third-party sites. If you have any legal issues please contact appropriate video owners hosters.</disclaimer>
-	  <language>EN</language>
+    <summary lang="en">SportHD par chakir1981</summary>
+    <description lang="en">Flux sportifs de SportHD.me</description>
+    <disclaimer lang="en">Tous les flux de cet add-on sont hébergés sur des sites tiers et mis en ligne par d'autres personnes. Nous ne sommes pas responsables des contenus hébergés sur ces sites tiers. En cas de problème juridique, veuillez contacter les propriétaires/hébergeurs vidéo concernés.</disclaimer>
+          <language>EN</language>
     <license>GNU GPL, version 2</license>
-    <twitter>https://twitter.com/Bugatsinho</twitter>
     <news>
-      [B]v0.1.91[/B] 04/10/2026
-      - New: Futbol Libre MOV (futbol-libre.mov) with triple menu: Latino, USA, Football Live + Search
-      - Futbol Libre / tarjetarojita: streams play again (correct Referer/Origin for the player CDN)
+      [B]v2.0.3[/B] 01/11/2026
+- L'add-on est maintenant publié au nom de chakir1981.
+- v2.0.2 : correction du cache d'images de Kodi — les fichiers d'images sont renommés (icon2.png / fanart2.jpg) pour que le nouveau logo et le nouveau fanart s'affichent partout.
+- v2.0.1 : retour au menu classique (Événements en direct + sites annexes) ; réglage « Uniquement les sources françaises » dans les paramètres (activé par défaut) ; serveurs affichés « un », « deux », « trois ».
     </news>
 
     <assets>
-      <icon>icon.png</icon>
-      <fanart>fanart.jpg</fanart>
+      <icon>icon2.png</icon>
+      <fanart>fanart2.jpg</fanart>
     </assets>
   </extension>
 </addon>

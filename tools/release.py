@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Release helper for the Bugatsinho Kodi repository.
+Release helper for the chakir1981 Kodi repository.
 
 Usage examples:
     # Full release of plugin.video.sporthdme as 0.1.85

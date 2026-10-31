@@ -1,46 +1,46 @@
 <addons>
-	<addon id="repository.bugatsinho" name="Dépôt Bugatsinho" version="2.9.2" provider-name="Bugatsinho">
-		<extension point="xbmc.addon.repository" name="Dépôt Bugatsinho">
-			<dir>
-				<info compressed="false">https://raw.githubusercontent.com/chakir1981/tonton.github.io/master/addons.xml</info>
-				<checksum>https://raw.githubusercontent.com/chakir1981/tonton.github.io/master/addons.xml.md5</checksum>
-				<datadir zip="true">https://raw.githubusercontent.com/chakir1981/tonton.github.io/master/_zips</datadir>
-				<hashes>false</hashes>
-			</dir>
-			<dir>
-				<info compressed="false">https://raw.githubusercontent.com/teamuniversal/scrapers/master/_modules4all/zips/addons.xml</info>
-				<checksum>https://raw.githubusercontent.com/teamuniversal/scrapers/master/_modules4all/zips/addons.xml.md5</checksum>
-				<datadir zip="true">https://raw.githubusercontent.com/teamuniversal/scrapers/master/_modules4all/zips/</datadir>
-				<hashes>false</hashes>
-			</dir>
-			<dir>
-				<info>https://raw.githubusercontent.com/jsergio123/zips/master/addons.xml.gz</info>
-				<checksum verify="sha256">https://raw.githubusercontent.com/jsergio123/zips/master/addons.xml.gz.sha256</checksum>
-				<datadir zip="true">https://raw.githubusercontent.com/jsergio123/zips/master/</datadir>
-				<artdir>https://raw.githubusercontent.com/jsergio123/zips/master/</artdir>
-				<hashes>sha256</hashes>
-			</dir>
-			<dir>
-				<info compressed="false">https://raw.githubusercontent.com/Gujal00/smrzips/master/addons.xml</info>
-				<checksum>https://raw.githubusercontent.com/Gujal00/smrzips/master/addons.xml.md5</checksum>
-				<datadir zip="true">https://raw.githubusercontent.com/Gujal00/smrzips/master/zips/</datadir>
-			</dir>
-			<dir>
-				<info compressed="false">https://raw.githubusercontent.com/bugatsinho/python-koding/master/addons.xml</info>
-				<checksum>https://raw.githubusercontent.com/bugatsinho/python-koding/master/addons.xml.md5</checksum>
-				<datadir zip="true">https://raw.githubusercontent.com/bugatsinho/python-koding/master/zips/</datadir>
-			</dir>
-		</extension>
-		<extension point="xbmc.addon.metadata">
-			<summary>Dépôt Bugatsinho</summary>
-			<description>Ce dépôt contient des add-ons grecs, espagnols et bien d'autres ! Lisez d'abord la description de chaque add-on !</description>
-			<assets>
-				<icon>icon.png</icon>
-				<fanart>fanart.jpg</fanart>
-			</assets>
-			<platform>all</platform>
-		</extension>
-	</addon>
+	<addon id="repository.chakir1981" name="Dépôt chakir1981" version="2.9.2" provider-name="chakir1981">
+    <extension point="xbmc.addon.repository" name="Dépôt chakir1981">
+        <dir>
+            <info compressed="false">https://raw.githubusercontent.com/chakir1981/tonton.github.io/master/addons.xml</info>
+            <checksum>https://raw.githubusercontent.com/chakir1981/tonton.github.io/master/addons.xml.md5</checksum>
+            <datadir zip="true">https://raw.githubusercontent.com/chakir1981/tonton.github.io/master/_zips</datadir>
+            <hashes>false</hashes>
+        </dir>
+        <dir>
+            <info compressed="false">https://raw.githubusercontent.com/teamuniversal/scrapers/master/_modules4all/zips/addons.xml</info>
+            <checksum>https://raw.githubusercontent.com/teamuniversal/scrapers/master/_modules4all/zips/addons.xml.md5</checksum>
+            <datadir zip="true">https://raw.githubusercontent.com/teamuniversal/scrapers/master/_modules4all/zips/</datadir>
+            <hashes>false</hashes>
+        </dir>
+        <dir>
+            <info>https://raw.githubusercontent.com/jsergio123/zips/master/addons.xml.gz</info>
+                        <checksum verify="sha256">https://raw.githubusercontent.com/jsergio123/zips/master/addons.xml.gz.sha256</checksum>
+                        <datadir zip="true">https://raw.githubusercontent.com/jsergio123/zips/master/</datadir>
+                        <artdir>https://raw.githubusercontent.com/jsergio123/zips/master/</artdir>
+                        <hashes>sha256</hashes>
+        </dir>
+        <dir>
+            <info compressed="false">https://raw.githubusercontent.com/Gujal00/smrzips/master/addons.xml</info>
+            <checksum>https://raw.githubusercontent.com/Gujal00/smrzips/master/addons.xml.md5</checksum>
+            <datadir zip="true">https://raw.githubusercontent.com/Gujal00/smrzips/master/zips/</datadir>
+        </dir>
+    </extension>
+    <extension point="xbmc.addon.metadata">
+        <summary>Dépôt chakir1981</summary>
+        <description>Ce dépôt contient des add-ons grecs, espagnols et bien d'autres ! Lisez d'abord la description de chaque add-on !</description>
+        <news>
+            [B]v2.9.2[/B] 01/11/2026
+- Le dépôt s'appelle maintenant « Dépôt chakir1981 » — installez le nouveau zip du dépôt, puis désinstallez l'ancien dépôt de votre liste d'add-ons.
+- Renommage des fichiers d'images (icon2.png / fanart2.jpg) : force Kodi à afficher le nouveau logo du dépôt (sinon l'ancien reste en cache).
+        </news>
+        <assets>
+                        <icon>icon2.png</icon>
+            <fanart>fanart2.jpg</fanart>
+                </assets>
+        <platform>all</platform>
+    </extension>
+</addon>
 
 	<addon id="plugin.video.cartoonsgr" name="CartoonsGR" version="1.0.60" provider-name="Bugatsinho">
 	  <requires>
@@ -464,35 +464,35 @@ Remerciements à @MrEntertainRepo, développeur d'origine de l'add-on</descripti
 				<platform>all</platform>
 		</extension>
 	</addon>
-	<addon id="plugin.video.sporthdme" name="SportHD" version="2.0.2" provider-name="Bugatsinho">
-	  <requires>
-		<!--import addon="xbmc.python" version="2.1.0"/-->
-		<import addon="script.module.dateutil" />
-		<import addon="script.module.six" />
-		<import addon="script.module.requests" version="2.19.1" />
-	  </requires>
-	  <extension point="xbmc.python.pluginsource" library="default.py">
-		<provides>video</provides>
-	  </extension>
-	  <extension point="xbmc.addon.metadata">
-		<summary lang="en">SportHD par Bugatsinho</summary>
-		<description lang="en">Flux sportifs de SportHD.me</description>
-		<disclaimer lang="en">Tous les flux de cet add-on sont hébergés sur des sites tiers et mis en ligne par d'autres personnes. Nous ne sommes pas responsables des contenus hébergés sur ces sites tiers. En cas de problème juridique, veuillez contacter les propriétaires/hébergeurs vidéo concernés.</disclaimer>
-		  <language>EN</language>
-		<license>GNU GPL, version 2</license>
-		<twitter>https://twitter.com/Bugatsinho</twitter>
-		<news>
-      [B]v0.1.92[/B] 31/10/2026
-- Nouveau : réglage « Uniquement les sources françaises » (activé par défaut) — seules les chaînes françaises sont listées et les matchs sans source française sont masqués
-- Interface de l'add-on entièrement en français
-- v0.1.91 : Futbol Libre MOV (triple menu + recherche), flux Futbol Libre réparés
+	<addon id="plugin.video.sporthdme" name="SportHD" version="2.0.3" provider-name="chakir1981">
+  <requires>
+    <!--import addon="xbmc.python" version="2.1.0"/-->
+    <import addon="script.module.dateutil" />
+    <import addon="script.module.six" />
+    <import addon="script.module.requests" version="2.19.1" />
+  </requires>
+  <extension point="xbmc.python.pluginsource" library="default.py">
+    <provides>video</provides>
+  </extension>
+  <extension point="xbmc.addon.metadata">
+    <summary lang="en">SportHD par chakir1981</summary>
+    <description lang="en">Flux sportifs de SportHD.me</description>
+    <disclaimer lang="en">Tous les flux de cet add-on sont hébergés sur des sites tiers et mis en ligne par d'autres personnes. Nous ne sommes pas responsables des contenus hébergés sur ces sites tiers. En cas de problème juridique, veuillez contacter les propriétaires/hébergeurs vidéo concernés.</disclaimer>
+          <language>EN</language>
+    <license>GNU GPL, version 2</license>
+    <news>
+      [B]v2.0.3[/B] 01/11/2026
+- L'add-on est maintenant publié au nom de chakir1981.
+- v2.0.2 : correction du cache d'images de Kodi — les fichiers d'images sont renommés (icon2.png / fanart2.jpg) pour que le nouveau logo et le nouveau fanart s'affichent partout.
+- v2.0.1 : retour au menu classique (Événements en direct + sites annexes) ; réglage « Uniquement les sources françaises » dans les paramètres (activé par défaut) ; serveurs affichés « un », « deux », « trois ».
     </news>
-		<assets>
-		  <icon>icon.png</icon>
-		  <fanart>fanart.jpg</fanart>
-		</assets>
-	  </extension>
-	</addon>
+
+    <assets>
+      <icon>icon2.png</icon>
+      <fanart>fanart2.jpg</fanart>
+    </assets>
+  </extension>
+</addon>
 
 	<addon id="script.module.idna" name="idna" version="2.8" provider-name="Kim Davies">
 	  <requires>
