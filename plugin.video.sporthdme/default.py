@@ -18,6 +18,7 @@ from resources.modules import site_embedlivesports
 from resources.modules import site_futbollibre
 from resources.modules import site_futbolmov
 from resources.modules import site_iptv
+from resources.modules import site_vavoo
 import time
 from dateutil.parser import parse
 from dateutil.tz import gettz
@@ -33,6 +34,8 @@ SITES = {s.KEY: s for s in EXTRA_SITES}
 SITES.update((s.KEY, s) for s in site_futbolmov.SUBSITES)
 # iptv-org live channels: one main-menu entry -> its three lists (iptv_menu)
 SITES.update((s.KEY, s) for s in site_iptv.SUBSITES)
+# Vavoo French channels: one main-menu entry -> its two lists (vavoo_menu)
+SITES.update((s.KEY, s) for s in site_vavoo.SUBSITES)
 
 _url = sys.argv[0]
 _handle = int(sys.argv[1])
@@ -104,6 +107,9 @@ def Main_menu():
     addDir('[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(site_iptv.NAME),
            'iptv', 'iptv_menu', ICON, FANART, True,
            infoLabels={'title': site_iptv.NAME, 'plot': site_iptv.DESC})
+    addDir('[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(site_vavoo.NAME),
+           'vavoo', 'vavoo_menu', ICON, FANART, True,
+           infoLabels={'title': site_vavoo.NAME, 'plot': site_vavoo.DESC})
     # addDir('[B][COLOR gold]Alternative VIEW [/COLOR][/B]', '', '', ICON, FANART, '')
     # addDir('[B][COLOR gold]Alternative LIVE EVENTS[/COLOR][/B]', Alt_url, 15, ICON, FANART, '')
     # addDir('[B][COLOR white]SPORTS[/COLOR][/B]', '', 3, ICON, FANART, '')
@@ -1042,6 +1048,14 @@ def iptv_menu():
     xbmcplugin.endOfDirectory(_handle)
 
 
+def vavoo_menu():
+    for s in site_vavoo.SUBSITES:
+        addDir(u'[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(s.NAME), s.KEY,
+               'site_events', ICON, FANART, True,
+               infoLabels={'title': s.NAME, 'plot': s.DESC})
+    xbmcplugin.endOfDirectory(_handle)
+
+
 def fmov_search():
     kb = xbmc.Keyboard('', u'Rechercher')
     kb.doModal()
@@ -1186,6 +1200,8 @@ def router(paramstring):
             fmov_menu()
         elif params['mode'] == 'iptv_menu':
             iptv_menu()
+        elif params['mode'] == 'vavoo_menu':
+            vavoo_menu()
         elif params['mode'] == 'fmov_search':
             fmov_search()
         elif params['mode'] == 'site_events':
