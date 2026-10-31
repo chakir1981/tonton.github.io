@@ -31,6 +31,22 @@ SITES = {s.KEY: s for s in EXTRA_SITES}
 # futbol-libre.mov: one main-menu entry -> its three lists (fmov_menu)
 SITES.update((s.KEY, s) for s in site_futbolmov.SUBSITES)
 
+# Grands championnats européens : mêmes sources que ÉVÉNEMENTS EN DIRECT
+# (league.st + repli tvsport.guide), filtrées par championnat puis, si le
+# réglage « Uniquement les sources françaises » est actif, par chaînes
+# françaises. Une chaîne FR (Canal+ Foot, beIN France, RMC...) ne figure
+# dans les sources que les jours où la télé française diffuse le match :
+# le menu est donc vide les autres jours, c'est normal.
+LEAGUE_MENU = [
+    (u'Angleterre', u'Premier League, Championship, League One', r'England '),
+    (u'Espagne', u'La Liga, Segunda División', r'Spain '),
+    (u'Italie', u'Serie A, Serie B', r'Italy '),
+    (u'Allemagne', u'Bundesliga, 2. Bundesliga, 3. Liga', r'Germany (?!DEL)'),
+    (u'Portugal', u'Primeira Liga', r'Portugal '),
+]
+LEAGUES = dict((name, (desc, re.compile(rx))) for name, desc, rx in LEAGUE_MENU)
+
+
 _url = sys.argv[0]
 _handle = int(sys.argv[1])
 
@@ -91,6 +107,11 @@ def log_error(msg):
 def Main_menu():
     # addDir('[B][COLOR gold]Channels 24/7[/COLOR][/B]', 'https://1.livesoccer.sx/program.php', 14, ICON, FANART, '')
     addDir(u'[B][COLOR white]ÉVÉNEMENTS EN DIRECT[/COLOR][/B]', Live_url, 'events', ICON, FANART, True)
+    addDir(u'[B][COLOR gold]GRANDS CHAMPIONNATS[/COLOR][/B]', 'leagues', 'leagues_menu', ICON, FANART, True,
+           infoLabels={'title': u'Grands championnats',
+                       'plot': u'Angleterre, Espagne, Italie, Allemagne, Portugal — '
+                               u'uniquement les matchs diffusés sur une chaîne '
+                               u'française (Canal+ Foot, beIN, RMC Sport...).'})
     for _s in EXTRA_SITES:
         addDir('[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(_s.NAME),
                _s.KEY, 'site_events', ICON, FANART, True,
@@ -125,7 +146,7 @@ def _matches_from_page(url):
     return json.loads(re.findall(old_pattern, events.replace(',false', ''), re.DOTALL)[0])
 
 
-def get_events(url):  # 5
+def get_events(url, league_rx=None, league_label=u''):  # 5
     matches = None
     if url != Live_fallback_url:
         try:
@@ -143,6 +164,10 @@ def get_events(url):  # 5
         control.infoDialog(u"[COLOR red]Aucun match programmé.[/COLOR]", NAME, ICON, 5000)
         return
 
+    def _league_of(m):
+        raw = m.get('league') or u''
+        return six.ensure_text(raw, encoding='utf-8', errors='replace') if raw else u''
+
     # matches = re.findall('''null\,(\{"(?:matches|customNotFoundMessage).+?)\]\}\]n''', events, re.DOTALL)[0]
     # pattern = r'("matches"\s*\:\s*\[.+?])}]}]n"'
     # pattern = r'"matches"\s*\:\s*(\[.+?])}]]}]n'
@@ -159,7 +184,11 @@ def get_events(url):  # 5
         now_time_in_ms = datetime.now().timestamp() * 1000
     fr_only = _french_only()
     filtered_out = 0
+    league_total = 0
     for match in matches:
+        if league_rx is not None and not league_rx.search(_league_of(match)):
+            continue
+        league_total += 1
         channels = match.get("channels", [])
         if fr_only and not _channels_have_french(channels):
             filtered_out += 1
@@ -203,7 +232,20 @@ def get_events(url):  # 5
 
         # streams = str(quote(base64.b64encode(six.ensure_binary(str(streams)))))
     if not event_list:
-        if filtered_out:
+        if league_rx is not None:
+            if league_total:
+                control.infoDialog(
+                    u"[COLOR gold]Aucune source française pour {0} aujourd'hui.[/COLOR]\n"
+                    u"Les chaînes françaises (Canal+ Foot, beIN, RMC...) ne sont "
+                    u"listées que les jours de diffusion.\n"
+                    u"[COLOR lime]{1} match(s) programmé(s) — désactivez « Uniquement les "
+                    u"sources françaises » dans les paramètres pour les voir.[/COLOR]"
+                    .format(league_label, league_total), NAME, ICON, 9000)
+            else:
+                control.infoDialog(
+                    u"[COLOR gold]Aucun match {0} au programme aujourd'hui.[/COLOR]"
+                    .format(league_label), NAME, ICON, 6000)
+        elif filtered_out:
             control.infoDialog(u"[COLOR gold]Aucune source française parmi les matchs du moment.[/COLOR]", NAME, ICON, 6000)
         return
     events = sorted(event_list, key=lambda x: x[1])
@@ -949,6 +991,15 @@ def addDir(name, url, mode, iconimage, description, isFolder=True, infoLabels=No
     xbmcplugin.addDirectoryItem(_handle, url=u, listitem=liz, isFolder=isFolder)
 
 
+def leagues_menu():
+    for name, desc, _rx in LEAGUE_MENU:
+        addDir(u'[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(name),
+               name, 'league_events', ICON, FANART, True,
+               infoLabels={'title': name, 'plot': desc})
+    xbmcplugin.setContent(_handle, 'movies')
+    xbmcplugin.endOfDirectory(_handle)
+
+
 def site_events_menu(key):
     site = SITES[key]
     try:
@@ -1137,6 +1188,12 @@ def router(paramstring):
             # else:
             #     print("Not yet time to check for updates.")
             get_events(params['url'])
+        elif params['mode'] == 'leagues_menu':
+            leagues_menu()
+        elif params['mode'] == 'league_events':
+            entry = LEAGUES.get(params.get('url', u''))
+            if entry:
+                get_events(Live_url, league_rx=entry[1], league_label=params['url'])
         elif params['mode'] == 'get_streams':
             get_stream(params['name'], params['url'])
         elif params['mode'] == 'play_stream':

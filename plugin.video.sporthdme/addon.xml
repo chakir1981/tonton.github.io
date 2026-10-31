@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="0.1.92" provider-name="Bugatsinho">
+<addon id="plugin.video.sporthdme" name="SportHD" version="0.1.93" provider-name="Bugatsinho">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -17,8 +17,9 @@
     <license>GNU GPL, version 2</license>
     <twitter>https://twitter.com/Bugatsinho</twitter>
     <news>
-      [B]v0.1.92[/B] 31/10/2026
-- Nouveau : réglage « Uniquement les sources françaises » (activé par défaut) — seules les chaînes françaises sont listées et les matchs sans source française sont masqués
+      [B]v0.1.93[/B] 01/11/2026
+- Nouveau : menu « Grands championnats » — Angleterre, Espagne, Italie, Allemagne, Portugal (sources de SportHD, chaînes françaises uniquement)
+- v0.1.92 : réglage « Uniquement les sources françaises » (activé par défaut) — seules les chaînes françaises sont listées et les matchs sans source française sont masqués
 - Interface de l'add-on entièrement en français
 - v0.1.91 : Futbol Libre MOV (triple menu + recherche), flux Futbol Libre réparés
     </news>
