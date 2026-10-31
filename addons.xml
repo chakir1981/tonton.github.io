@@ -464,7 +464,7 @@ Remerciements à @MrEntertainRepo, développeur d'origine de l'add-on</descripti
 				<platform>all</platform>
 		</extension>
 	</addon>
-	<addon id="plugin.video.sporthdme" name="SportHD" version="0.1.91" provider-name="Bugatsinho">
+	<addon id="plugin.video.sporthdme" name="SportHD" version="0.1.92" provider-name="Bugatsinho">
 	  <requires>
 		<!--import addon="xbmc.python" version="2.1.0"/-->
 		<import addon="script.module.dateutil" />
@@ -482,10 +482,11 @@ Remerciements à @MrEntertainRepo, développeur d'origine de l'add-on</descripti
 		<license>GNU GPL, version 2</license>
 		<twitter>https://twitter.com/Bugatsinho</twitter>
 		<news>
-		  [B]v0.1.91[/B] 04/10/2026
-- Nouveau : Futbol Libre MOV (futbol-libre.mov) avec triple menu : Latino, USA, Football Live + Recherche
-- Futbol Libre / tarjetarojita : les flux se lisent à nouveau (Referer/Origin corrects pour le CDN du lecteur)
-		</news>
+      [B]v0.1.92[/B] 31/10/2026
+- Nouveau : réglage « Uniquement les sources françaises » (activé par défaut) — seules les chaînes françaises sont listées et les matchs sans source française sont masqués
+- Interface de l'add-on entièrement en français
+- v0.1.91 : Futbol Libre MOV (triple menu + recherche), flux Futbol Libre réparés
+    </news>
 		<assets>
 		  <icon>icon.png</icon>
 		  <fanart>fanart.jpg</fanart>

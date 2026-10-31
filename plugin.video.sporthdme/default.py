@@ -90,7 +90,7 @@ def log_error(msg):
 
 def Main_menu():
     # addDir('[B][COLOR gold]Channels 24/7[/COLOR][/B]', 'https://1.livesoccer.sx/program.php', 14, ICON, FANART, '')
-    addDir('[B][COLOR white]LIVE EVENTS[/COLOR][/B]', Live_url, 'events', ICON, FANART, True)
+    addDir(u'[B][COLOR white]ÉVÉNEMENTS EN DIRECT[/COLOR][/B]', Live_url, 'events', ICON, FANART, True)
     for _s in EXTRA_SITES:
         addDir('[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(_s.NAME),
                _s.KEY, 'site_events', ICON, FANART, True,
@@ -102,9 +102,9 @@ def Main_menu():
     # addDir('[B][COLOR gold]Alternative LIVE EVENTS[/COLOR][/B]', Alt_url, 15, ICON, FANART, '')
     # addDir('[B][COLOR white]SPORTS[/COLOR][/B]', '', 3, ICON, FANART, '')
     # addDir('[B][COLOR white]BEST LEAGUES[/COLOR][/B]', '', 2, ICON, FANART, '')
-    addDir('[B][COLOR gold]Settings[/COLOR][/B]', 'set', 'settings', ICON, FANART, False)
-    addDir('[B][COLOR gold]Clear Addon Data[/COLOR][/B]', 'clear', 'clear', ICON, FANART, False)
-    addDir('[B][COLOR gold]Version: [COLOR lime]{}[/COLOR][/B]'.format(vers), '', 'version', ICON, FANART, False)
+    addDir(u'[B][COLOR gold]Paramètres[/COLOR][/B]', 'set', 'settings', ICON, FANART, False)
+    addDir(u"[B][COLOR gold]Vider les données de l'add-on[/COLOR][/B]", 'clear', 'clear', ICON, FANART, False)
+    addDir(u'[B][COLOR gold]Version : [COLOR lime]{}[/COLOR][/B]'.format(vers), '', 'version', ICON, FANART, False)
     xbmcplugin.setContent(_handle, 'movies')
     xbmcplugin.endOfDirectory(_handle)
 
@@ -140,7 +140,7 @@ def get_events(url):  # 5
         except Exception as e:
             log_info('events fallback {0} failed: {1!r}'.format(Live_fallback_url, e))
     if not matches:
-        control.infoDialog("[COLOR red]No Match Scheduled.[/COLOR]", NAME, ICON, 5000)
+        control.infoDialog(u"[COLOR red]Aucun match programmé.[/COLOR]", NAME, ICON, 5000)
         return
 
     # matches = re.findall('''null\,(\{"(?:matches|customNotFoundMessage).+?)\]\}\]n''', events, re.DOTALL)[0]
@@ -157,8 +157,13 @@ def get_events(url):  # 5
         now_time_in_ms = (time.mktime(now.timetuple()) + now.microsecond / 1e6) * 1000
     else:
         now_time_in_ms = datetime.now().timestamp() * 1000
+    fr_only = _french_only()
+    filtered_out = 0
     for match in matches:
         channels = match.get("channels", [])
+        if fr_only and not _channels_have_french(channels):
+            filtered_out += 1
+            continue
         # links = match['additionalLinks']
         # links.extend(match['channels'])
         icon = match.get('team1Img', ICON)
@@ -197,6 +202,10 @@ def get_events(url):  # 5
         event_list.append([name, compare, channels, icon])
 
         # streams = str(quote(base64.b64encode(six.ensure_binary(str(streams)))))
+    if not event_list:
+        if filtered_out:
+            control.infoDialog(u"[COLOR gold]Aucune source française parmi les matchs du moment.[/COLOR]", NAME, ICON, 6000)
+        return
     events = sorted(event_list, key=lambda x: x[1])
     for event in deduplicate_events(events):
         streams = str(quote(base64.b64encode(six.ensure_binary(str(event[2])))))
@@ -217,22 +226,105 @@ def deduplicate_events(events):
     return unique_events
 
 
+# ---------------------------------------------------------------------------
+# Filtrage « sources françaises » (réglage french_only, activé par défaut).
+# Le site marque chaque chaîne d'un match avec un code pays (language='FR',
+# 'GB', 'ES'...) : on garde uniquement les chaînes françaises ; les matchs
+# sans aucune chaîne française disparaissent de la liste.
+# ---------------------------------------------------------------------------
+FRENCH_LANGS = ('fr', 'french', u'français', 'francais')
+FRENCH_NAME_RE = re.compile(
+    r'\bfr\b|\[fr\]|\(fr\)|french|fran[cç]ais|\bfrance\b|canal\+\s*foot|rmc\s*sport|'
+    r'quipe|tf1\b|\bm6\b|\bw9\b|\btmc\b|ligue1')
+
+
+def _french_only():
+    """Réglage « Uniquement les sources françaises » (activé par défaut)."""
+    try:
+        return (ADDON.getSetting('french_only') or 'true').lower() == 'true'
+    except Exception:
+        return True
+
+
+def _is_french_source(name, lang):
+    """True si la chaîne/le serveur est en français (code pays, langue ou nom)."""
+    try:
+        lang_s = six.ensure_text(lang or u'', encoding='utf-8', errors='replace').strip().lower()
+        name_s = six.ensure_text(name or u'', encoding='utf-8', errors='replace').lower()
+    except Exception:
+        return False
+    if lang_s in FRENCH_LANGS:
+        return True
+    return bool(name_s and FRENCH_NAME_RE.search(name_s))
+
+
+def _db_channel(channel_name):
+    """Cherche une chaîne par nom dans la base locale (channels.json)."""
+    try:
+        wanted = channel_name.replace(' ', '')
+        for channel in load_data_from_json():
+            if channel.get('channelName', '').replace(' ', '') == wanted:
+                return channel
+    except Exception:
+        return None
+    return None
+
+
+def _channels_have_french(channels):
+    """True si le match a au moins une chaîne française. Les chaînes
+    indéterminées (base absente, nom inconnu) ne masquent pas le match :
+    le filtrage fin se fait à l'ouverture du match."""
+    identified = False
+    for ch in channels:
+        if isinstance(ch, dict):
+            identified = True
+            if _is_french_source(ch.get('name'), ch.get('language')):
+                return True
+        else:
+            row = _db_channel(six.ensure_text(ch, encoding='utf-8', errors='replace'))
+            if row is not None:
+                identified = True
+                if _is_french_source(row.get('channelName'), row.get('language')):
+                    return True
+    return not identified
+
+
+def _servers_have_french(servers):
+    """True si au moins un serveur (sites annexes) est en français."""
+    for srv in servers or []:
+        if isinstance(srv, dict):
+            if _is_french_source(srv.get('name'), srv.get('language')):
+                return True
+        elif isinstance(srv, (list, tuple)) and srv:
+            if _is_french_source(srv[0], ''):
+                return True
+        elif isinstance(srv, six.string_types):
+            if _is_french_source(srv, ''):
+                return True
+    return False
+
+
 def get_stream(name, url):  # 4
     data = six.ensure_text(base64.b64decode(unquote(url))).strip('\n')
 
     import ast
+    fr_only = _french_only()
     sstreams = []
     for event in ast.literal_eval(data):
         if not isinstance(event, dict):  # TNT Sports 1
-            datos = get_links_for_channel(event)
+            datos = get_links_for_channel(event) or []
             # xbmc.log('SHOW DATOS: {}'.format(datos))
             for chan, link, lang in datos:
                 chan = six.ensure_text(chan, encoding='utf-8', errors='replace')
                 lang = six.ensure_text(lang, encoding='utf-8', errors='replace')
+                if fr_only and not _is_french_source(chan, lang):
+                    continue
                 chan = u'[COLOR gold]{}[/COLOR] - {}'.format(chan, lang)
                 sstreams.append((link, chan))
 
         else:
+            if fr_only and not _is_french_source(event.get('name'), event.get('language')):
+                continue
             link = event.get('links', [])
             lang = six.ensure_text(event.get('language', ''), encoding='utf-8', errors='replace')
             chan = six.ensure_text(event.get('name', ''), encoding='utf-8', errors='replace')
@@ -241,8 +333,13 @@ def get_stream(name, url):  # 4
                 sstreams.append((url_, chan))
 
     if len(sstreams) < 1:
-        control.infoDialog("[COLOR gold]No Links available ATM.\n [COLOR lime]Try Again Later![/COLOR]", NAME,
-                           ICON, 5000)
+        if fr_only:
+            control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]\n"
+                               u"[COLOR lime]Réglage : « Uniquement les sources françaises » dans les paramètres.[/COLOR]",
+                               NAME, ICON, 7000)
+        else:
+            control.infoDialog(u"[COLOR gold]Aucun lien disponible pour le moment.\n "
+                               u"[COLOR lime]Réessayez plus tard ![/COLOR]", NAME, ICON, 5000)
         return
     else:
         if len(sstreams) > 1:
@@ -278,7 +375,7 @@ def resolve2(name, url):
 
     # NEW GLISCO/SANSAT BRANCH
     if '//glisco' in url or '//sansat' in url or 'vertex' in url or 'nexa' in url or 'kora.st' in url:
-        Dialog.notification(NAME, "[COLOR skyblue]Attempting To Resolve Link Now[/COLOR]", ICON, 2000, False)
+        Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
         chan_id = url.split('id=')[-1]
 
         def _extract_stream(embed_html):
@@ -387,7 +484,7 @@ def resolve2(name, url):
         stream_url = xbmc_curl_encode(flink, stream_headers)
 
     elif any(i in url for i in resolved):
-        Dialog.notification(NAME, "[COLOR skyblue]Attempting To Resolve Link Now[/COLOR]", ICON, 2000, False)
+        Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
         referer = '{uri.scheme}://{uri.netloc}/'.format(uri=urlparse(url))
         r = six.ensure_str(client.request(url))
         if 'get_content.php?channel=' in r or 'api/player.php?id=' in r:
@@ -591,7 +688,7 @@ def resolve2(name, url):
                               'Connection': 'keep-alive'}
             stream_url = xbmc_curl_encode(flink, stream_headers)
     elif '//dabac' in url:
-        Dialog.notification(NAME, "[COLOR skyblue]Attempting To Resolve Link Now[/COLOR]", ICON, 2000, False)
+        Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
         referer = '{uri.scheme}://{uri.netloc}/'.format(uri=urlparse(url))
         frame = referer + "api/player.php?id={}"
         id = url.split("id=")[-1]
@@ -698,6 +795,8 @@ def fetch_and_store_channel_data():
 
 
 def load_data_from_json():
+    if not xbmcvfs.exists(JSON_FILE_PATH):
+        return []
     f = control.openFile(JSON_FILE_PATH, 'r')
     contents = f.read()
     f.close()
@@ -865,8 +964,15 @@ def site_events_menu(key):
         except Exception as e:
             log_info('emls fallback failed: {0!r}'.format(e))
         key = site_futbollibre.KEY
+    fr_only = _french_only()
+    shown = 0
     for e in events:
+        if fr_only and e.get('servers') and not _servers_have_french(e.get('servers')):
+            continue
         _add_site_event(key, site, e)
+        shown += 1
+    if events and not shown:
+        control.infoDialog(u"[COLOR gold]Aucune source française parmi les matchs de ce site.[/COLOR]", NAME, ICON, 6000)
     xbmcplugin.setContent(_handle, 'movies')
     xbmcplugin.endOfDirectory(_handle)
 
@@ -899,13 +1005,13 @@ def fmov_menu():
         addDir(u'[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(s.NAME), s.KEY,
                'site_events', ICON, FANART, True,
                infoLabels={'title': s.NAME, 'plot': s.DESC})
-    addDir('[B][COLOR gold]Search[/COLOR][/B]', 'fmov', 'fmov_search', ICON, FANART, True,
-           infoLabels={'title': 'Search', 'plot': 'Search all three lists (team, league...).'})
+    addDir(u'[B][COLOR gold]Rechercher[/COLOR][/B]', 'fmov', 'fmov_search', ICON, FANART, True,
+           infoLabels={'title': u'Rechercher', 'plot': u'Rechercher dans les trois listes (équipe, championnat…).'})
     xbmcplugin.endOfDirectory(_handle)
 
 
 def fmov_search():
-    kb = xbmc.Keyboard('', 'Search')
+    kb = xbmc.Keyboard('', u'Rechercher')
     kb.doModal()
     query = six.ensure_text(kb.getText(), encoding='utf-8', errors='replace').strip().lower() \
         if kb.isConfirmed() else u''
@@ -926,7 +1032,7 @@ def fmov_search():
                 _add_site_event(site.KEY, site, e)
                 found += 1
     if not found:
-        control.infoDialog(u'[COLOR red]No results[/COLOR]', NAME, ICON, 4000)
+        control.infoDialog(u'[COLOR red]Aucun résultat[/COLOR]', NAME, ICON, 4000)
     xbmcplugin.setContent(_handle, 'movies')
     xbmcplugin.endOfDirectory(_handle)
 
@@ -935,14 +1041,21 @@ def site_streams_menu(payload):
     d = json.loads(payload)
     poster = d.get('p') or ICON
     title = d.get('t', '')
+    fr_only = _french_only()
+    shown = 0
     for sname, surl in d['s']:
         # server names carry accents too (e.g. "Señal 1") -- byte-str .format()
         # on a unicode arg raises UnicodeEncodeError in py2, so keep it unicode.
         sname = six.ensure_text(sname, encoding='utf-8', errors='replace')
+        if fr_only and not _is_french_source(sname, ''):
+            continue
         info = {'title': u'{0} | {1}'.format(title, sname), 'plot': title}
         addDir(u'[B]{0}[/B]'.format(sname),
                json.dumps({'k': d['k'], 'u': surl, 't': title, 'p': d.get('p', '')}),
                'site_play', poster, title, isFolder=False, infoLabels=info)
+        shown += 1
+    if not shown:
+        control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]", NAME, ICON, 6000)
     xbmcplugin.setContent(_handle, 'videos')
     xbmcplugin.endOfDirectory(_handle)
 
@@ -952,7 +1065,7 @@ def site_play(payload):
     site = SITES[d['k']]
     title = d.get('t') or NAME
     poster = d.get('p') or ICON
-    Dialog.notification(NAME, "[COLOR skyblue]Attempting To Resolve Link Now[/COLOR]", ICON, 2000, False)
+    Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
     result = site.resolve(d['u'])
     if not result:
         raise Exception('could not resolve stream for ' + d['u'])
@@ -1032,7 +1145,7 @@ def router(paramstring):
             Open_settings()
         elif params['mode'] == 'clear':
             control.deleteFile(LAST_UPDATE_FILE)
-            control.infoDialog("[COLOR gold]Files cleared[/COLOR]", NAME,
+            control.infoDialog(u"[COLOR gold]Fichiers effacés[/COLOR]", NAME,
                                ICON, 5000)
         elif params['mode'] == 'version':
             xbmc.executebuiltin('UpdateAddonRepos')
