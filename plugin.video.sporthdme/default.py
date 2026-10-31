@@ -132,6 +132,14 @@ def _matches_from_page(url):
 
 
 def get_events(url):  # 5
+    # préchauffage Vavoo (catalogue + grille TV en arrière-plan) : pendant
+    # que l'utilisateur parcourt les matchs, les caches se remplissent et
+    # les chaînes de dépannage d'un match sans source française
+    # s'afficheront sans attente au clic (voir site_vavoo.warmup).
+    try:
+        site_vavoo.warmup()
+    except Exception:
+        pass
     matches = None
     if url != Live_fallback_url:
         try:
@@ -340,6 +348,15 @@ def _add_vavoo_fallback(match_label, poster=ICON):
     if not _vavoo_fallback():
         return False
     title = _clean_label(match_label)
+    try:
+        warm = site_vavoo.is_warm()
+    except Exception:
+        warm = True
+    if not warm:
+        # catalogue ou grille TV pas encore prêts : dire à l'utilisateur
+        # pourquoi la liste tarde un instant (normalement < quelques s)
+        Dialog.notification(NAME, u'[COLOR gold]Recherche de chaînes de dépannage…[/COLOR]',
+                            ICON, 4000, False)
     try:
         chans = site_vavoo.fallback_channels(title)
     except Exception as e:
@@ -1058,6 +1075,12 @@ def addDir(name, url, mode, iconimage, description, isFolder=True, infoLabels=No
 
 
 def site_events_menu(key):
+    # préchauffage Vavoo (catalogue + grille TV en arrière-plan) pour les
+    # chaînes de dépannage instantanées au clic sur un match (voir warmup)
+    try:
+        site_vavoo.warmup()
+    except Exception:
+        pass
     site = SITES[key]
     try:
         events = site.list_events()

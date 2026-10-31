@@ -41,18 +41,26 @@ the user just picks the next one in the servers menu.
 
 Match fallback: fallback_channels(match_title) finds the French channels
 actually broadcasting the match. Primary engine: the real French TV
-schedule (EPG from iptv-epg.org, cached 3 h) — the match's team names
-and competition are searched in the upcoming programmes of the French
-channels, best match first, with its airtime. Secondary engine: static
-sport/competition rules, used when the schedule is unreachable.
-default.py offers them as "dépannage" sources for matches that have
-no French channel of their own.
+schedule (EPG from iptv-epg.org, cached 3 h in memory AND on disk, so
+a Kodi restart never re-downloads it on a click) — the match's team
+names and competition are searched in the upcoming programmes of the
+French channels, best match first, with its airtime. Secondary engine:
+static sport/competition rules, used when the schedule is unreachable
+or too slow to be ready. default.py offers them as "dépannage" sources
+for matches that have no French channel of their own.
+
+Speed: warmup() starts a background thread (called by default.py when
+a match list opens) that preloads the catalogs and the schedule, so by
+the time the user clicks a match the fallback list is instant. The
+click path itself waits at most EPG_WAIT_S seconds for an already
+running download, then falls back to the static rules immediately.
 """
 
 import base64
 import json
 import os
 import re
+import threading
 import time
 import uuid
 
@@ -249,7 +257,14 @@ def _fallback_patterns(label):
 
 
 def _vavoo_index():
-    """Index des chaînes Vavoo France par nom normalisé (meilleure variante)."""
+    """Index des chaînes Vavoo France par nom normalisé (meilleure variante).
+
+    Mémoïsé quelques minutes : le clic sur un match ne reconstruit plus
+    l'index à chaque fois (lecture du cache disque + tri des variantes).
+    """
+    now = time.time()
+    if _vav_idx_cache['idx'] and now - _vav_idx_cache['ts'] < _VAV_IDX_TTL:
+        return _vav_idx_cache['idx']
     items = []
     for group in (GROUP_SPORT, GROUP_ALL):
         try:
@@ -266,7 +281,13 @@ def _vavoo_index():
         cur = idx.get(n)
         if cur is None or len(ch['urls']) > len(cur['urls']):
             idx[n] = ch
+    _vav_idx_cache['ts'] = now
+    _vav_idx_cache['idx'] = idx
     return idx
+
+
+_VAV_IDX_TTL = 900.0                 # l'index est refait au plus toutes les 15 min
+_vav_idx_cache = {'ts': 0.0, 'idx': None}
 
 
 def _heuristic_channels(label, limit=6):
@@ -303,8 +324,10 @@ EPG_URL = u'https://iptv-epg.org/files/epg-fr.xml.gz'
 EPG_TTL = 3 * 3600.0      # la grille est retéléchargée au plus toutes les 3 h
 EPG_PAST = 2.5 * 3600.0   # un match commencé il y a moins de 2 h 30 reste proposé
 EPG_AHEAD = 11 * 3600.0   # et un match qui démarre dans les 11 h aussi
+EPG_WAIT_S = 3.0          # attente max du clic pendant un téléchargement en cours
 
 _epg_cache = {'ts': 0.0, 'data': None}
+_epg_lock = threading.Lock()   # un seul téléchargement de grille à la fois
 EPG_LAST_ERROR = u''
 
 # chaînes EPG retenues (les autres programmes sont ignorés au téléchargement)
@@ -574,7 +597,7 @@ def _epg_download():
         requests.packages.urllib3.disable_warnings()
     except Exception:
         pass
-    r = requests.get(EPG_URL, timeout=(10, 90),
+    r = requests.get(EPG_URL, timeout=(8, 45),
                      headers={'User-Agent': UA_BROWSER,
                               'Accept-Encoding': 'identity'}, verify=False)
     r.raise_for_status()
@@ -628,24 +651,102 @@ def _epg_download():
     return {'chan': chan, 'prog': prog}
 
 
-def _epg_load():
-    """Grille TV en cache (max EPG_TTL), téléchargement à l'usage seulement."""
+def _epg_cache_path():
+    """Fichier de cache disque de la grille TV (profil de l'add-on)."""
+    try:
+        import xbmcaddon
+        import xbmcvfs
+        profile = xbmcaddon.Addon().getAddonInfo('profile')
+        try:
+            return os.path.join(xbmcvfs.translatePath(profile),
+                                'epg_cache.json')
+        except AttributeError:  # Kodi 18
+            import xbmc
+            return os.path.join(xbmc.translatePath(profile),
+                                'epg_cache.json')
+    except Exception:
+        import tempfile
+        return os.path.join(tempfile.gettempdir(), 'sporthd_epg_cache.json')
+
+
+def _epg_disk_load():
+    """Grille TV du disque si elle est encore fraîche (max EPG_TTL).
+
+    Un redémarrage de Kodi ne retélécharge donc plus la grille au clic :
+    le fichier du profil est relu en quelques millisecondes.
+    """
+    try:
+        with open(_epg_cache_path()) as f:
+            blob = json.load(f)
+        ts = float(blob.get('t') or 0)
+        chan = blob.get('chan')
+        prog = blob.get('prog')
+        if not chan or not prog or time.time() - ts >= EPG_TTL:
+            return None
+        data = {'chan': chan, 'prog': [tuple(p) for p in prog]}
+        _epg_cache['ts'] = ts
+        _epg_cache['data'] = data
+        return data
+    except Exception:
+        return None
+
+
+def _epg_disk_save(data):
+    """Enregistre la grille décodée pour les prochains démarrages."""
+    try:
+        blob = {'t': _epg_cache.get('ts') or time.time(),
+                'chan': data.get('chan') or {},
+                'prog': [list(p) for p in data.get('prog') or []]}
+        with open(_epg_cache_path(), 'w') as f:
+            json.dump(blob, f)
+    except Exception:
+        pass
+
+
+def _epg_load(wait=0.0):
+    """Grille TV en cache (mémoire puis disque, max EPG_TTL).
+
+    wait > 0 : attend au plus `wait` secondes qu'un téléchargement déjà
+    lancé en arrière-plan (warmup) se termine ; au-delà, on rend la main
+    avec ce qu'on a (voire rien) plutôt que de bloquer l'affichage — les
+    règles de secours prennent le relais et la grille sera prête au
+    prochain clic.
+    """
     now = time.time()
     if _epg_cache['data'] and now - _epg_cache['ts'] < EPG_TTL:
         return _epg_cache['data']
+    disk = _epg_disk_load()
+    if disk:
+        return disk
     global EPG_LAST_ERROR
+    got = _epg_lock.acquire(False)
+    if not got and wait > 0:
+        try:
+            got = _epg_lock.acquire(True, wait)
+        except Exception:
+            got = False
+    if not got:
+        # un téléchargement tourne encore : ne pas attendre davantage
+        return _epg_cache['data']
     try:
-        data = _epg_download()
-    except Exception as exc:
-        EPG_LAST_ERROR = _errstr(exc)
-        return _epg_cache['data']   # grille périmée vaut mieux que rien
-    if data.get('prog'):
-        _epg_cache['ts'] = now
-        _epg_cache['data'] = data
-        EPG_LAST_ERROR = u''
-        return data
-    EPG_LAST_ERROR = u'grille TV vide (iptv-epg.org)'
-    return _epg_cache['data']
+        now = time.time()
+        if _epg_cache['data'] and now - _epg_cache['ts'] < EPG_TTL:
+            return _epg_cache['data']   # le warmup a fini entre-temps
+        try:
+            data = _epg_download()
+        except Exception as exc:
+            EPG_LAST_ERROR = _errstr(exc)
+            return _epg_cache['data']   # grille périmée vaut mieux que rien
+        if data.get('prog'):
+            _epg_cache['ts'] = now
+            _epg_cache['data'] = data
+            _epg_disk_save(data)
+            EPG_LAST_ERROR = u''
+            return data
+        EPG_LAST_ERROR = u'grille TV vide (iptv-epg.org)'
+        return _epg_cache['data']
+    finally:
+        _epg_lock.release()
 
 
 _EPG_ALIAS = {u'CANAL': u'CANAL PREMIERE', u'CANAL PLUS': u'CANAL PREMIERE'}
@@ -684,12 +785,13 @@ def _map_epg_channel(dn, vav_idx):
     return None
 
 
-def _epg_channels(label, vav_idx, limit=6):
+def _epg_channels(label, vav_idx, limit=6, epg_wait=0.0):
     """Chaînes Vavoo qui diffusent (ou diffuseront) ce match, selon la grille.
 
     Chaque dict retourné ajoute 'epg_start'/'epg_stop' (epoch UTC) et
-    'epg_title' (libellé du programme) au format {'title','logo','urls'}."""
-    data = _epg_load()
+    'epg_title' (libellé du programme) au format {'title','logo','urls'}.
+    epg_wait : attente max d'un téléchargement de grille déjà en cours."""
+    data = _epg_load(wait=epg_wait)
     if not data or not data.get('prog'):
         return []
     teams, comp_text = _match_teams(label)
@@ -732,7 +834,7 @@ def _epg_channels(label, vav_idx, limit=6):
     return out
 
 
-def fallback_channels(label, limit=6):
+def fallback_channels(label, limit=6, epg_wait=EPG_WAIT_S):
     """Chaînes Vavoo françaises les plus probables pour un match.
 
     label : titre du match (équipes, compétition...). Retourne une liste
@@ -741,7 +843,7 @@ def fallback_channels(label, limit=6):
     1) chaînes trouvées dans la grille TV (programme correspondant aux
        équipes / à la compétition, horaire inclus) ;
     2) complétées par l'heuristique sport/compétition si la grille
-       n'a rien donné (ou n'est pas accessible).
+       n'a rien donné (ou n'est pas prête dans les `epg_wait` secondes).
     """
     if not label:
         return []
@@ -750,7 +852,7 @@ def fallback_channels(label, limit=6):
         return []
     out, used = [], set()
     try:
-        epg = _epg_channels(label, vav_idx, limit=limit)
+        epg = _epg_channels(label, vav_idx, limit=limit, epg_wait=epg_wait)
     except Exception:
         epg = []
     for ch in epg:
@@ -1032,8 +1134,75 @@ def clear_cache():
     """Delete the Vavoo cache file (diagnostic action)."""
     global LAST_ERROR
     LAST_ERROR = u''
+    _vav_idx_cache['ts'] = 0.0
+    _vav_idx_cache['idx'] = None
     try:
         os.remove(_cache_path())
+        return True
+    except Exception:
+        return False
+
+
+# ---- préchauffage : catalogue + grille TV prêts avant le clic ----------------
+
+_warm_thread = [None]   # thread de préchauffage en cours (le cas échéant)
+
+
+def warmup():
+    """Précharge en arrière-plan catalogue Vavoo + grille TV.
+
+    Appelé quand une liste de matchs s'ouvre : pendant que l'utilisateur
+    parcourt les événements, les caches se remplissent ; les chaînes de
+    dépannage d'un match sans source française s'affichent alors sans
+    attente au clic. Une seule exécution à la fois, jamais bloquante.
+    """
+    try:
+        t = _warm_thread[0]
+        if t is not None and t.is_alive():
+            return
+    except Exception:
+        return
+
+    def _run():
+        for group in (GROUP_SPORT, GROUP_ALL):
+            try:
+                _cached_channels(group)
+            except Exception:
+                pass
+        try:
+            _epg_load()
+        except Exception:
+            pass
+
+    try:
+        th = threading.Thread(target=_run)
+        th.daemon = True
+        _warm_thread[0] = th
+        th.start()
+    except Exception:
+        pass
+
+
+def is_warm():
+    """True si catalogue ET grille TV sont déjà prêts en mémoire/disque
+    (l'affichage des chaînes de dépannage sera immédiat)."""
+    try:
+        now = time.time()
+        if not (_epg_cache['data'] and now - _epg_cache['ts'] < EPG_TTL):
+            # pas en mémoire : acceptable si le disque est frais
+            try:
+                with open(_epg_cache_path()) as f:
+                    blob = json.load(f)
+                if time.time() - float(blob.get('t') or 0) >= EPG_TTL:
+                    return False
+            except Exception:
+                return False
+        cache = _cache_load()
+        for group in (GROUP_SPORT, GROUP_ALL):
+            e = cache.get('channels_' + group) or {}
+            if not (now - e.get('t', 0) < VAVOO_CACHE_H * 3600
+                    and e.get('items')):
+                return False
         return True
     except Exception:
         return False
@@ -1080,9 +1249,14 @@ def diagnostic():
     try:
         data = _epg_load()
         if data and data.get('prog'):
+            try:
+                on_disk = os.path.exists(_epg_cache_path())
+            except Exception:
+                on_disk = False
             out.append((u'Grille TV (rattachement Vavoo)', True,
-                        u'{0} programmes, {1} chaînes suivies'
-                        .format(len(data['prog']), len(data['chan']))))
+                        u'{0} programmes, {1} chaînes suivies{2}'
+                        .format(len(data['prog']), len(data['chan']),
+                                u', enregistrée sur disque' if on_disk else u'')))
         else:
             out.append((u'Grille TV (rattachement Vavoo)', False,
                         EPG_LAST_ERROR or u'indisponible (règles de secours utilisées)'))
@@ -1254,6 +1428,8 @@ if __name__ == '__main__':
     ]
     _old = _cached_channels
     _cached_channels = lambda g: list(_fake)  # noqa: E731
+    _vav_idx_cache['ts'] = 0.0          # la mémo de l'index suit le catalogue
+    _vav_idx_cache['idx'] = None
     try:
         _fb = fallback_channels(u'PSG vs Marseille - Ligue 1')
         assert [_c['title'] for _c in _fb] == [
@@ -1271,6 +1447,8 @@ if __name__ == '__main__':
         assert len(fallback_channels(u'PSG vs OM', limit=2)) == 2
         assert fallback_channels(u'') == []
         _cached_channels = lambda g: []  # noqa: E731
+        _vav_idx_cache['ts'] = 0.0      # vider la mémo : catalogue vide
+        _vav_idx_cache['idx'] = None
         assert fallback_channels(u'PSG vs OM') == []
     finally:
         _cached_channels = _old
