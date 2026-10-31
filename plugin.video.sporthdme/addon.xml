@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="2.0.1" provider-name="Bugatsinho">
+<addon id="plugin.video.sporthdme" name="SportHD" version="2.0.2" provider-name="Bugatsinho">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -17,17 +17,14 @@
     <license>GNU GPL, version 2</license>
     <twitter>https://twitter.com/Bugatsinho</twitter>
     <news>
-      [B]v2.0.1[/B] 01/11/2026
-- Menu classique retrouvé : « Événements en direct » et les sites annexes, comme après la traduction française
-- Les menus « Grands championnats » et « Chaînes françaises » sont retirés
-- Dans les paramètres : « Uniquement les sources françaises » (activé par défaut) — seules les sources françaises sont affichées ; désactivez-le pour voir toutes les sources
-- Conservés : le nouveau logo et les nouveaux visuels, et les serveurs affichés « un », « deux », « trois »
-- v2.0.0 : nouveau logo (icône + fanart) ; v0.1.92 : interface entièrement en français
+      [B]v2.0.2[/B] 01/11/2026
+- Correction d'affichage : chez les utilisateurs qui avaient déjà l'add-on, Kodi gardait l'ancien logo et l'ancien fanart (cache d'images de Kodi). Les fichiers d'images sont renommés (icon2.png / fanart2.jpg) : Kodi recharge maintenant le nouveau logo et le nouveau fanart partout, sans aucune manipulation.
+- v2.0.1 : retour au menu classique (Événements en direct + sites annexes) ; réglage « Uniquement les sources françaises » dans les paramètres (activé par défaut) ; serveurs affichés « un », « deux », « trois ».
     </news>
 
     <assets>
-      <icon>icon.png</icon>
-      <fanart>fanart.jpg</fanart>
+      <icon>icon2.png</icon>
+      <fanart>fanart2.jpg</fanart>
     </assets>
   </extension>
 </addon>

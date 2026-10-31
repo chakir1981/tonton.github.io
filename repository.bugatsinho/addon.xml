@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="repository.bugatsinho" name="Dépôt Bugatsinho" version="2.9.1" provider-name="Bugatsinho">
+<addon id="repository.bugatsinho" name="Dépôt Bugatsinho" version="2.9.2" provider-name="Bugatsinho">
     <extension point="xbmc.addon.repository" name="Dépôt Bugatsinho">
         <dir>
             <info compressed="false">https://raw.githubusercontent.com/chakir1981/tonton.github.io/master/addons.xml</info>
@@ -15,10 +15,10 @@
         </dir>
         <dir>
             <info>https://raw.githubusercontent.com/jsergio123/zips/master/addons.xml.gz</info>
-			<checksum verify="sha256">https://raw.githubusercontent.com/jsergio123/zips/master/addons.xml.gz.sha256</checksum>
-			<datadir zip="true">https://raw.githubusercontent.com/jsergio123/zips/master/</datadir>
-			<artdir>https://raw.githubusercontent.com/jsergio123/zips/master/</artdir>
-			<hashes>sha256</hashes>
+                        <checksum verify="sha256">https://raw.githubusercontent.com/jsergio123/zips/master/addons.xml.gz.sha256</checksum>
+                        <datadir zip="true">https://raw.githubusercontent.com/jsergio123/zips/master/</datadir>
+                        <artdir>https://raw.githubusercontent.com/jsergio123/zips/master/</artdir>
+                        <hashes>sha256</hashes>
         </dir>
         <dir>
             <info compressed="false">https://raw.githubusercontent.com/Gujal00/smrzips/master/addons.xml</info>
@@ -34,10 +34,14 @@
     <extension point="xbmc.addon.metadata">
         <summary>Dépôt Bugatsinho</summary>
         <description>Ce dépôt contient des add-ons grecs, espagnols et bien d'autres ! Lisez d'abord la description de chaque add-on !</description>
+        <news>
+            [B]v2.9.2[/B] 01/11/2026
+- Renommage des fichiers d'images (icon2.png / fanart2.jpg) : force Kodi à afficher le nouveau logo du dépôt (sinon l'ancien reste en cache).
+        </news>
         <assets>
-			<icon>icon.png</icon>
-            <fanart>fanart.jpg</fanart>
-		</assets>
+                        <icon>icon2.png</icon>
+            <fanart>fanart2.jpg</fanart>
+                </assets>
         <platform>all</platform>
     </extension>
 </addon>

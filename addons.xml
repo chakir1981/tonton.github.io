@@ -1,5 +1,5 @@
 <addons>
-	<addon id="repository.bugatsinho" name="Dépôt Bugatsinho" version="2.9.1" provider-name="Bugatsinho">
+	<addon id="repository.bugatsinho" name="Dépôt Bugatsinho" version="2.9.2" provider-name="Bugatsinho">
 		<extension point="xbmc.addon.repository" name="Dépôt Bugatsinho">
 			<dir>
 				<info compressed="false">https://raw.githubusercontent.com/chakir1981/tonton.github.io/master/addons.xml</info>
@@ -464,7 +464,7 @@ Remerciements à @MrEntertainRepo, développeur d'origine de l'add-on</descripti
 				<platform>all</platform>
 		</extension>
 	</addon>
-	<addon id="plugin.video.sporthdme" name="SportHD" version="2.0.1" provider-name="Bugatsinho">
+	<addon id="plugin.video.sporthdme" name="SportHD" version="2.0.2" provider-name="Bugatsinho">
 	  <requires>
 		<!--import addon="xbmc.python" version="2.1.0"/-->
 		<import addon="script.module.dateutil" />
