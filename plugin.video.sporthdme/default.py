@@ -164,10 +164,14 @@ def get_events(url):  # 5
     else:
         now_time_in_ms = datetime.now().timestamp() * 1000
     fr_only = _french_only()
+    vavoo_fb = _vavoo_fallback()
     filtered_out = 0
     for match in matches:
         channels = match.get("channels", [])
-        if fr_only and not _channels_have_french(channels):
+        # match sans chaîne française : masqué, sauf si le rattachement
+        # Vavoo est actif (il recevra des chaînes Vavoo de dépannage)
+        no_fr = fr_only and not _channels_have_french(channels)
+        if no_fr and not vavoo_fb:
             filtered_out += 1
             continue
         # links = match['additionalLinks']
@@ -205,6 +209,8 @@ def get_events(url):  # 5
         m_color = "lime" if is_live else "gold"
         ftime = u'[COLOR cyan]{}[/COLOR]'.format(ftime)
         name = u'{0} [COLOR {1}]{2}[/COLOR] - [I]{3}[/I]'.format(ftime, m_color, event, lname)
+        if no_fr:  # conservé grâce au rattachement Vavoo -> balise visible
+            name += u' [COLOR gold][Vavoo][/COLOR]'
         event_list.append([name, compare, channels, icon])
 
         # streams = str(quote(base64.b64encode(six.ensure_binary(str(streams)))))
@@ -310,6 +316,53 @@ def _servers_have_french(servers):
     return False
 
 
+def _vavoo_fallback():
+    """Réglage « Rattacher les chaînes Vavoo aux matchs sans source
+    française » (activé par défaut) : ces matchs restent affichés, avec
+    une balise [Vavoo], et leur menu de sources propose des chaînes
+    Vavoo françaises de dépannage."""
+    try:
+        return (ADDON.getSetting('vavoo_fallback') or 'true').lower() == 'true'
+    except Exception:
+        return True
+
+
+def _clean_label(label):
+    """Retire les codes couleur/balises Kodi d'un libellé de match."""
+    return re.sub(r'\[/?(?:COLOR[^\]]*|B|I)\]', u'', six.ensure_text(
+        label or u'', encoding='utf-8', errors='replace')).strip()
+
+
+def _add_vavoo_fallback(match_label, poster=ICON):
+    """Propose les chaînes Vavoo françaises de dépannage pour un match
+    sans source française (choisies selon le sport/la compétition).
+    True si au moins une chaîne a été ajoutée à la liste."""
+    if not _vavoo_fallback():
+        return False
+    title = _clean_label(match_label)
+    try:
+        chans = site_vavoo.fallback_channels(title)
+    except Exception as e:
+        log_info('vavoo fallback failed: {0!r}'.format(e))
+        chans = []
+    for ch in chans:
+        surl = (ch.get('urls') or [''])[0]
+        if not surl:
+            continue
+        payload = json.dumps({'k': site_vavoo.SUBSITES[0].KEY, 'u': surl,
+                              'alt': ch['urls'][1:],
+                              't': title, 'p': ch.get('logo') or ''})
+        info = {'title': u'{0} | {1} (Vavoo)'.format(title, ch['title']),
+                'plot': u"{0} — {1} via Vavoo : chaîne française proposée "
+                        u"en dépannage (le match n'est pas garanti sur "
+                        u"cette chaîne).".format(title, ch['title'])}
+        addDir(u'[B][COLOR gold]{0}[/COLOR][/B] [COLOR gray]· Vavoo[/COLOR]'
+               .format(ch['title']), payload, 'site_play',
+               ch.get('logo') or poster, title, isFolder=False,
+               infoLabels=info)
+    return bool(chans)
+
+
 # Les trois miroirs du service principal sont affichés discrètement
 # « un », « deux », « trois » au lieu des domaines réels.
 _MIRROR_LABELS = ((r'vertex\.st', u'un'), (r'nexa\.st', u'deux'), (r'kora\.st', u'trois'))
@@ -355,13 +408,22 @@ def get_stream(name, url):  # 4
                 sstreams.append((url_, chan))
 
     if len(sstreams) < 1:
-        if fr_only:
+        # rattachement Vavoo : chaînes françaises de dépannage proposées
+        # pour ce match quand il n'a aucune source française
+        fb = _add_vavoo_fallback(name) if fr_only else False
+        if fb:
+            control.infoDialog(u'[COLOR gold]Aucune source française native — '
+                               u'chaînes Vavoo proposées en dépannage.[/COLOR]',
+                               NAME, ICON, 6000)
+        elif fr_only:
             control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]\n"
                                u"[COLOR lime]Réglage : « Uniquement les sources françaises » dans les paramètres.[/COLOR]",
                                NAME, ICON, 7000)
         else:
             control.infoDialog(u"[COLOR gold]Aucun lien disponible pour le moment.\n "
                                u"[COLOR lime]Réessayez plus tard ![/COLOR]", NAME, ICON, 5000)
+        xbmcplugin.setContent(_handle, 'videos')
+        xbmcplugin.endOfDirectory(_handle)
         return
     else:
         if len(sstreams) > 1:
@@ -992,11 +1054,17 @@ def site_events_menu(key):
     # (it wiped the whole Vavoo lists with the misleading message
     # "Aucune source française parmi les matchs de ce site").
     fr_only = _french_only() and not getattr(site, 'NO_FR_FILTER', False)
+    vavoo_fb = _vavoo_fallback()
     shown = 0
     for e in events:
-        if fr_only and e.get('servers') and not _servers_have_french(e.get('servers')):
+        # événement sans serveur français : masqué, sauf si le rattachement
+        # Vavoo est actif (ses sources Vavoo de dépannage seront proposées
+        # dans le menu des serveurs)
+        no_fr = fr_only and e.get('servers') and \
+            not _servers_have_french(e.get('servers'))
+        if no_fr and not vavoo_fb:
             continue
-        _add_site_event(key, site, e)
+        _add_site_event(key, site, e, vavoo=no_fr)
         shown += 1
     if events and not shown:
         control.infoDialog(u"[COLOR gold]Aucune source française parmi les matchs de ce site.[/COLOR]", NAME, ICON, 6000)
@@ -1012,7 +1080,7 @@ def site_events_menu(key):
     xbmcplugin.endOfDirectory(_handle)
 
 
-def _add_site_event(key, site, e):
+def _add_site_event(key, site, e, vavoo=False):
     # title colour signals state: cyan = live, gold = upcoming, grey = finished.
     colors = {'live': 'cyan', 'soon': 'gold', 'done': 'grey'}
     t = time_convert(e['start_ms']) if e['start_ms'] else u'-'
@@ -1028,6 +1096,8 @@ def _add_site_event(key, site, e):
     else:
         label = u'{0}[COLOR cyan]{1}[/COLOR] [COLOR {2}][B]{3}[/B][/COLOR]'.format(
             cc, t, colors.get(e['status'], 'gold'), title)
+    if vavoo:  # match conservé grâce au rattachement Vavoo -> balise
+        label += u' [COLOR gold][Vavoo][/COLOR]'
     # carry the event's title + poster down the chain so the servers menu
     # and the player show the match, not the generic SportHD art.
     payload = json.dumps({'k': key, 's': e['servers'],
@@ -1146,7 +1216,18 @@ def site_streams_menu(payload):
                'site_play', poster, title, isFolder=False, infoLabels=info)
         shown += 1
     if not shown:
-        control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]", NAME, ICON, 6000)
+        # rattachement Vavoo : chaînes françaises de dépannage quand le
+        # match n'a aucun serveur français (jamais pour les sites Vavoo
+        # eux-mêmes, déjà français par définition)
+        fb = False
+        if not d['k'].startswith('vavoo'):
+            fb = _add_vavoo_fallback(title, poster)
+        if fb:
+            control.infoDialog(u'[COLOR gold]Aucune source française native — '
+                               u'chaînes Vavoo proposées en dépannage.[/COLOR]',
+                               NAME, ICON, 6000)
+        else:
+            control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]", NAME, ICON, 6000)
     xbmcplugin.setContent(_handle, 'videos')
     xbmcplugin.endOfDirectory(_handle)
 
@@ -1157,7 +1238,18 @@ def site_play(payload):
     title = d.get('t') or NAME
     poster = d.get('p') or ICON
     Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
-    result = site.resolve(d['u'])
+    # 'alt' (rattachement Vavoo) : variantes de la même chaîne, essayées
+    # dans l'ordre si la première ne résout pas.
+    links = [d.get('u') or ''] + [u for u in (d.get('alt') or []) if u]
+    result = None
+    for u in links:
+        try:
+            result = site.resolve(u)
+        except Exception as exc:
+            log_info('site resolve {0} failed: {1!r}'.format(u, exc))
+            result = None
+        if result:
+            break
     if not result:
         raise Exception('could not resolve stream for ' + d['u'])
     # resolve() normally returns just the m3u8 string; sites that chain

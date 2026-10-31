@@ -38,6 +38,11 @@ Some channel names in the catalog carry a source suffix ("BEIN SPORTS 1
 .b", ".c", ".s") or "(BACKUP)". Suffixes are stripped and variants are
 grouped as several servers of the same channel, so if one source fails
 the user just picks the next one in the servers menu.
+
+Match fallback: fallback_channels(match_title) picks the French channels
+most likely broadcasting the match (sport/competition keyword rules) so
+default.py can offer them as "dépannage" sources for matches that have
+no French channel of their own.
 """
 
 import base64
@@ -47,6 +52,7 @@ import re
 import time
 import uuid
 
+import six
 from six.moves.urllib.parse import quote_plus
 
 NAME = u'Chaînes Vavoo (France)'
@@ -132,6 +138,157 @@ def group_channels(items):
 def is_sport(name):
     up = ' ' + clean_name(name).upper() + ' '
     return any(w in up for w in _SPORT_WORDS)
+
+
+# ---- match -> probable French channels (fallback feature) -------------------
+#
+# Les matchs sans aucune chaîne française reçoivent des chaînes Vavoo en
+# dépannage : on choisit les bouquets français les plus probables pour le
+# sport / la compétition du match. C'est une aide au zapping, pas une
+# grille TV : le match n'est pas garanti sur la chaîne proposée.
+
+def _norm(s):
+    """Minuscules/accents/ponctuation retirés : 'CANAL+ FOOT' -> 'CANAL FOOT'."""
+    try:
+        import unicodedata
+        s = s if isinstance(s, six.text_type) else six.ensure_text(
+            s or u'', encoding='utf-8', errors='replace')
+        s = s.upper()
+        s = u''.join(c for c in unicodedata.normalize('NFD', s)
+                     if unicodedata.category(c) != 'Mn')
+        s = re.sub(r'[^\w\s]', ' ', s, flags=re.UNICODE)
+        return u' '.join(s.split())
+    except Exception:
+        return u''
+
+
+# (regex sur le titre normalisé du match -> chaînes probables, par ordre de
+# préférence). Les noms sont des préfixes de noms de chaînes normalisés.
+_FALLBACK_RULES = (
+    # compétitions françaises / européennes reprises par Canal+/DAZN/beIN
+    (u'LIGUE 1|LIGUE 2|DOM TOM', (u'CANAL LIGUE 1', u'DAZN LIGUE 1',
+                                  u'LIGUE 1', u'BEIN SPORTS 1')),
+    (u'CHAMPIONS|EUROPA|CONFERENCE|UCL|UEL',
+     (u'BEIN SPORTS 1', u'BEIN SPORTS 2', u'CANAL FOOT', u'CANAL SPORT',
+      u'RMC SPORT 1')),
+    (u'COUPE DE FRANCE|COUPE DE LA LIGUE|TROPH',
+     (u'CANAL FOOT', u'BEIN SPORTS 1', u'FRANCE 3')),
+    # championnats étrangers
+    (u'PREMIER LEAGUE|CHAMPIONSHIP|ANGLI|ENGLAND',
+     (u'RMC SPORT 1', u'RMC SPORT 2')),
+    (u'LALIGA|LA LIGA|ESPANI|ESPAGNE|SPAIN|CALCIO ITALIA',
+     (u'BEIN SPORTS 1', u'BEIN SPORTS 2')),
+    (u'SERIE A|ITALI|ITALY', (u'BEIN SPORTS 1', u'BEIN SPORTS 2')),
+    (u'BUNDESLIGA|ALLEMAGNE|GERMAN', (u'BEIN SPORTS 1', u'BEIN SPORTS 2')),
+    (u'PRIMEIRA|PORTUG|EREDIVISIE|PAYS BAS|BRASIL|BRESIL|ARGENTIN|MEXIC',
+     (u'BEIN SPORTS 1', u'BEIN SPORTS 2')),
+    (u'MLS|SAUDI|QATAR|EMIRAT', (u'BEIN SPORTS 1', u'BEIN SPORTS 2')),
+    # sélections nationales : TF1/M6 et beIN
+    (u'COUPE DU MONDE|WORLD CUP|NATIONS LEAGUE|QUALIFIC|AMICAL|FRIENDLY|'
+     u'EURO 202|EURO 202[0-9]|JO |OLYMPIC|FRANCE -|- FRANCE|FRANCE VS|VS FRANCE',
+     (u'TF1', u'M6', u'BEIN SPORTS 1', u'CANAL FOOT')),
+    # autres sports (avant les noms de clubs : un « Paris Masters » est du
+    # tennis, pas un match du PSG)
+    (u'RUGBY|TOP 14|SIX NATIONS|TOURNOI|PRO D2|CHALLENGE CUP',
+     (u'CANAL SPORT', u'CANAL', u'FRANCE 2', u'FRANCE 3')),
+    (u'TENNIS|ATP|WTA|ROLAND|WIMBLEDON|US OPEN|DAVIS|BNP PARIBAS',
+     (u'EUROSPORT 1', u'CANAL SPORT')),
+    (u'CYCLISME|TOUR DE FRANCE|VUELTA|GIRO|UCI|CYCLING|DAUPHINE|CLASSIQUE',
+     (u'EUROSPORT 1', u'FRANCE 2', u'FRANCE 3')),
+    (u'FORMULE|FORMULA|F1 |GRAND PRIX|MOTOGP|WRC|RALLYE|MOTO GP|ELF',
+     (u'CANAL SPORT', u'AUTOMOTO')),
+    (u'BASKET|NBA|EUROLEAGUE|BETCLIC|WNBA',
+     (u'BEIN SPORTS 1', u'BEIN SPORTS 2')),
+    (u'HANDBALL|VOLLEY|JUDO|ESCRIME|NATATION|ATHLETIS|HALLE',
+     (u'BEIN SPORTS 1', u'BEIN SPORTS 2')),
+    (u'BOXE|MMA|UFC|COMBAT|KICK|MUAY|BELLATOR',
+     (u'CANAL SPORT', u'RMC SPORT 1', u'RMC SPORT 2')),
+    (u'GOLF', (u'GOLF', u'GOLF CHANNEL')),
+    (u'TROT|PMU|HIPPIQUE|QUINTE|COURSE HIPPIQUE|EQUESTRE|EQUITA',
+     (u'EQUIDIA',)),
+    (u'SNOOKER|DARTS|FLECHETTE|BILLARD|BOWLING',
+     (u'EUROSPORT 1',)),
+    (u'AMERICAIN|NFL |XFL|BASEBALL|MLB |HOCKEY|NHL |GLADIATOR',
+     (u'BEIN SPORTS 1', u'MULTISPORTS 1')),
+    (u'ESPORT|E-SPORT|GAMING|FORTNITE|LOL |LEAGUE OF LEGEND',
+     (u'BEIN SPORTS 1', u'MULTISPORTS 1')),
+    # grands clubs français (en dernier : les noms de villes comme Lyon ou
+    # Nice peuvent aussi désigner un lieu de compétition d'un autre sport)
+    (u'\\bPSG\\b|PARIS SG|PARIS SAINT|\\bMARSEILLE\\b|\\bOM\\b|\\bOL\\b|'
+     u'\\bLYON\\b|\\bMONACO\\b|\\bLENS\\b|\\bLILLE\\b|\\bNICE\\b|\\bRENNES\\b',
+     (u'CANAL LIGUE 1', u'DAZN LIGUE 1', u'LIGUE 1', u'BEIN SPORTS 1')),
+)
+# aucun motif reconnu -> bouquets football/sport les plus larges
+_FOOT_DEFAULT = (u'BEIN SPORTS 1', u'CANAL FOOT', u'CANAL SPORT',
+                 u'RMC SPORT 1', u'L EQUIPE', u'MULTISPORTS 1')
+
+
+def _fallback_patterns(label):
+    """Motifs de chaînes probables pour un match, ordre de préférence."""
+    text = _norm(label)
+    pats = []
+    for rx, rule_pats in _FALLBACK_RULES:
+        try:
+            hit = re.search(rx, text)
+        except Exception:
+            hit = None
+        if hit:
+            for p in rule_pats:
+                if p not in pats:
+                    pats.append(p)
+    if not pats:
+        pats = list(_FOOT_DEFAULT)
+    return pats
+
+
+def fallback_channels(label, limit=6):
+    """Chaînes Vavoo françaises les plus probables pour un match.
+
+    label : titre du match (équipe, compétition...). Retourne une liste
+    (max `limit`) de dicts {'title', 'logo', 'urls'} — la même structure
+    que group_channels() — ou [] si le catalogue Vavoo est inaccessible.
+    Les chaînes sont choisies par préfixe de nom normalisé ( tokens),
+    variante la plus courte d'abord (BEIN SPORTS 1 plutôt que ... HD).
+    """
+    if not label:
+        return []
+    pats = _fallback_patterns(label)
+    items = []
+    for group in (GROUP_SPORT, GROUP_ALL):
+        try:
+            items += _cached_channels(group)
+        except Exception:
+            pass
+    if not items:
+        return []
+    by_norm = {}
+    for ch in group_channels(items):
+        n = _norm(ch['title'])
+        if not n:
+            continue
+        cur = by_norm.get(n)
+        if cur is None or len(ch['urls']) > len(cur['urls']):
+            by_norm[n] = ch
+    out, used = [], set()
+    for pat in pats:
+        pt = _norm(pat).split()
+        if not pt:
+            continue
+        best = None
+        for n, ch in by_norm.items():
+            if n in used:
+                continue
+            tt = n.split()
+            if len(pt) <= len(tt) and tt[:len(pt)] == pt:
+                key = (len(tt), -len(ch['urls']))
+                if best is None or key < best[0]:
+                    best = (key, n, ch)
+        if best is not None:
+            used.add(best[1])
+            out.append(best[2])
+            if len(out) >= limit:
+                break
+    return out
 
 
 # ---- auth signature ---------------------------------------------------------
@@ -549,4 +706,75 @@ if __name__ == '__main__':
     assert sig_valid_until(_sig.decode('ascii')) == 4070899200000
     assert sig_valid_until('garbage!') == 0
     assert sig_valid_until(None) == 0
+    # ---- fallback matching (pure parts) ------------------------------------
+    assert _norm(u'CANAL+ FOOT') == u'CANAL FOOT'
+    assert _norm(u'CANAL + LIGUE 1') == u'CANAL LIGUE 1'
+    assert _norm(u"L'ÉQUIPE") == u'L EQUIPE'
+    assert _norm(u'GOLF+') == u'GOLF'
+    assert _norm('') == u''
+    # Ligue 1 -> Canal + Ligue 1 en premier
+    _p = _fallback_patterns(u'PSG vs Marseille - Ligue 1')
+    assert _p[0] == u'CANAL LIGUE 1' and u'DAZN LIGUE 1' in _p, _p
+    # Ligue des Champions -> beIN en premier
+    _p = _fallback_patterns(u'Real Madrid vs Man City - Liga des Campeones UCL')
+    assert _p[0] == u'BEIN SPORTS 1' and u'CANAL FOOT' in _p, _p
+    # Premier League -> RMC
+    _p = _fallback_patterns(u'Arsenal vs Liverpool - Premier League')
+    assert _p[0] == u'RMC SPORT 1', _p
+    # Rugby -> Canal+ Sport
+    _p = _fallback_patterns(u'Top 14 Rugby: Toulouse vs Stade Français')
+    assert _p[0] == u'CANAL SPORT', _p
+    # Tennis -> Eurosport 1
+    _p = _fallback_patterns(u'Tennis ATP Masters 1000')
+    assert _p[0] == u'EUROSPORT 1', _p
+    # « Paris » dans un titre de tennis ne doit pas déclencher la règle PSG
+    _p = _fallback_patterns(u'Tennis - ATP Paris Masters')
+    assert _p[0] == u'EUROSPORT 1', _p
+    # sélection nationale -> TF1 d'abord
+    _p = _fallback_patterns(u'France - Belgique, match amical')
+    assert _p[0] == u'TF1', _p
+    # rien de reconnu -> bouquets football génériques
+    assert _fallback_patterns(u'Club A vs Club B')[0] == u'BEIN SPORTS 1'
+    # fallback_channels sur un catalogue factice
+    _fake = [
+        {'name': 'BEIN SPORTS 1 .b', 'url': 'u1', 'logo': 'l'},
+        {'name': 'BEIN SPORTS 1 .c', 'url': 'u2', 'logo': ''},
+        {'name': 'BEIN SPORTS 1 HD', 'url': 'u3', 'logo': ''},
+        {'name': 'BEIN SPORTS MAX 4', 'url': 'u4', 'logo': ''},
+        {'name': 'RMC SPORT 1', 'url': 'u5', 'logo': ''},
+        {'name': 'RMC SPORT 1 UHD', 'url': 'u6', 'logo': ''},
+        {'name': 'CANAL+ FOOT', 'url': 'u7', 'logo': ''},
+        {'name': 'CANAL SPORT', 'url': 'u8', 'logo': ''},
+        {'name': 'CANAL + LIGUE 1', 'url': 'u9', 'logo': ''},
+        {'name': 'DAZN LIGUE 1 LIVE 1 HD', 'url': 'u10', 'logo': ''},
+        {'name': 'LIGUE 1 FHD', 'url': 'u17', 'logo': ''},
+        {'name': 'L EQUIPE', 'url': 'u11', 'logo': ''},
+        {'name': 'EUROSPORT 1', 'url': 'u12', 'logo': ''},
+        {'name': 'TF1 FHD', 'url': 'u13', 'logo': ''},
+        {'name': 'M6', 'url': 'u14', 'logo': ''},
+        {'name': 'MULTISPORTS 1', 'url': 'u15', 'logo': ''},
+        {'name': 'CANAL+ CINEMA', 'url': 'u16', 'logo': ''},
+    ]
+    _old = _cached_channels
+    _cached_channels = lambda g: list(_fake)  # noqa: E731
+    try:
+        _fb = fallback_channels(u'PSG vs Marseille - Ligue 1')
+        assert [_c['title'] for _c in _fb] == [
+            u'CANAL + LIGUE 1', u'DAZN LIGUE 1 LIVE 1 HD', u'LIGUE 1 FHD',
+            u'BEIN SPORTS 1'], _fb
+        # la variante la plus courte gagne (pas 'BEIN SPORTS 1 HD', pas MAX)
+        assert _fb[3]['urls'] == ['u1', 'u2'], _fb[3]
+        _fb = fallback_channels(u'Tennis Roland Garros')
+        assert _fb[0]['title'] == u'EUROSPORT 1', _fb
+        _fb = fallback_channels(u'Match inconnu A vs B')
+        assert _fb[0]['title'] == u'BEIN SPORTS 1' and \
+            u'CANAL+ CINEMA' not in [_c['title'] for _c in _fb], _fb
+        _fb = fallback_channels(u'France - Belgique, amical')
+        assert _fb[0]['title'] == u'TF1 FHD', _fb
+        assert len(fallback_channels(u'PSG vs OM', limit=2)) == 2
+        assert fallback_channels(u'') == []
+        _cached_channels = lambda g: []  # noqa: E731
+        assert fallback_channels(u'PSG vs OM') == []
+    finally:
+        _cached_channels = _old
     print('ok')

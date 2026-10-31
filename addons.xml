@@ -41,7 +41,7 @@
         <platform>all</platform>
     </extension>
 </addon>
-	<addon id="plugin.video.sporthdme" name="SportHD" version="2.0.9" provider-name="chakir1981">
+	<addon id="plugin.video.sporthdme" name="SportHD" version="2.1.0" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -58,10 +58,11 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
-      [B]v2.0.9[/B] 01/11/2026
-- Correctif principal : les chaînes Vavoo étaient masquées par le réglage « Uniquement les sources françaises » (activé par défaut) car leurs serveurs s'appellent « Serveur 1, Serveur 2… » — le message « Aucune source française parmi les matchs de ce site » s'affichait alors que les chaînes étaient bien chargées. Les rubriques Vavoo ne sont plus soumises à ce filtre (tout y est français par définition), aussi bien pour les listes que pour le choix des serveurs.
-- Nouveau : « Diagnostic Vavoo (dépannage) » dans la rubrique Vavoo — teste en direct le catalogue, la signature de secours, le cache local et la lecture d'un flux, affiche la version de l'add-on et la cause exacte des listes vides, et permet de vider le cache Vavoo.
-- Si les listes restent vides, un raccourci « Diagnostic Vavoo » apparaît directement dans la liste vide.
+      [B]v2.1.0[/B] 01/11/2026
+- Nouveau : rattachement des chaînes Vavoo aux matchs sans source française. Les matchs qui n'ont aucune chaîne française ne disparaissent plus : ils restent affichés avec une balise [Vavoo] et, à l'ouverture, proposent des chaînes Vavoo de dépannage (beIN Sports, Canal+, RMC Sport, L'Équipe, TF1/M6, Eurosport, DAZN…) choisies selon le sport et la compétition (Ligue 1 → Canal+/DAZN, Premier League → RMC Sport, rugby → Canal+ Sport, tennis/cyclisme → Eurosport, sélections nationales → TF1/M6…).
+- La lecture d'une chaîne Vavoo de dépannage essaie automatiquement les variantes de la chaîne si la première ne répond pas.
+- Nouveau réglage « Rattacher les chaînes Vavoo aux matchs sans source française (dépannage) » dans les paramètres (activé par défaut ; le comportement d'avant — masquer ces matchs — revient en le désactivant).
+- v2.0.9 : correctif — les chaînes Vavoo n'étaient plus masquées par le filtre « sources françaises » ; nouvel outil « Diagnostic Vavoo (dépannage) » (catalogue, signature, cache, lecture) avec vidage du cache.
 - v2.0.8 : correctif Vavoo — le catalogue est interrogé d'abord sans signature (le serveur de signatures vypn.net, parfois bloqué par les fournisseurs d'accès, n'est plus indispensable) ; message à l'écran si Vavoo est inaccessible.
 - v2.0.7 : retrait de la rubrique « Chaînes en direct (IPTV) » (listes iptv-org) ; « Chaînes Vavoo (France) » conservée.
 - v2.0.6 : nouvelle rubrique « Chaînes Vavoo (France) » : les bouquets français de la plateforme Vavoo. Les variantes d'une même chaîne sont proposées comme plusieurs serveurs. Flux authentifiés automatiquement à chaque lancement.
