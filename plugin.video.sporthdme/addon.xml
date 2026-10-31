@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="2.0.0" provider-name="Bugatsinho">
+<addon id="plugin.video.sporthdme" name="SportHD" version="2.0.1" provider-name="Bugatsinho">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -17,14 +17,12 @@
     <license>GNU GPL, version 2</license>
     <twitter>https://twitter.com/Bugatsinho</twitter>
     <news>
-      [B]v2.0.0[/B] 01/11/2026
-- Nouveau logo et nouveaux visuels (icône + fanart)
-- Les serveurs vertex.st / nexa.st / kora.st sont affichés « un », « deux », « trois »
-- Menu « Chaînes françaises » — parcourir par chaîne (Canal+ Foot, Ligue1+, beIN, RMC) : chaque chaîne liste les matchs qu'elle diffuse
-- « Coupes d'Europe » dans les Grands championnats — Ligue des Champions, Europa League, Conference League (visibles dès qu'une chaîne française les diffuse)
-- v0.1.93 : menu « Grands championnats » — Angleterre, Espagne, Italie, Allemagne, Portugal (sources de SportHD, chaînes françaises uniquement)
-- v0.1.92 : réglage « Uniquement les sources françaises » (activé par défaut) — seules les chaînes françaises sont listées et les matchs sans source française sont masqués
-- Interface de l'add-on entièrement en français
+      [B]v2.0.1[/B] 01/11/2026
+- Menu classique retrouvé : « Événements en direct » et les sites annexes, comme après la traduction française
+- Les menus « Grands championnats » et « Chaînes françaises » sont retirés
+- Dans les paramètres : « Uniquement les sources françaises » (activé par défaut) — seules les sources françaises sont affichées ; désactivez-le pour voir toutes les sources
+- Conservés : le nouveau logo et les nouveaux visuels, et les serveurs affichés « un », « deux », « trois »
+- v2.0.0 : nouveau logo (icône + fanart) ; v0.1.92 : interface entièrement en français
     </news>
 
     <assets>
