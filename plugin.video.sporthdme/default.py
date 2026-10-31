@@ -352,12 +352,36 @@ def _add_vavoo_fallback(match_label, poster=ICON):
         payload = json.dumps({'k': site_vavoo.SUBSITES[0].KEY, 'u': surl,
                               'alt': ch['urls'][1:],
                               't': title, 'p': ch.get('logo') or ''})
-        info = {'title': u'{0} | {1} (Vavoo)'.format(title, ch['title']),
-                'plot': u"{0} — {1} via Vavoo : chaîne française proposée "
-                        u"en dépannage (le match n'est pas garanti sur "
-                        u"cette chaîne).".format(title, ch['title'])}
-        addDir(u'[B][COLOR gold]{0}[/COLOR][/B] [COLOR gray]· Vavoo[/COLOR]'
-               .format(ch['title']), payload, 'site_play',
+        # horaire du programme trouvé dans la grille TV, s'il y en a un
+        st, sp = ch.get('epg_start') or 0, ch.get('epg_stop') or 0
+        epg_tag = u''
+        if st and sp:
+            now_s = time.time()
+            if st <= now_s <= sp:
+                epg_tag = u'en direct'
+            else:
+                epg_tag = u'\u00e0 {0}'.format(six.ensure_text(
+                    datetime.fromtimestamp(st).strftime('%H:%M'),
+                    encoding='utf-8', errors='replace'))
+        epg_title = six.ensure_text(ch.get('epg_title') or u'',
+                                    encoding='utf-8', errors='replace')
+        if epg_title:
+            info = {'title': u'{0} | {1} (Vavoo)'.format(title, ch['title']),
+                    'plot': u'{0} — {1} via Vavoo. Grille TV {2} : \u00ab {3} \u00bb '
+                            u"(l'horaire peut changer, le match n'est pas "
+                            u"garanti sur cette cha\u00eene).".format(
+                                title, ch['title'], epg_tag or u'(programme)',
+                                epg_title)}
+        else:
+            info = {'title': u'{0} | {1} (Vavoo)'.format(title, ch['title']),
+                    'plot': u"{0} — {1} via Vavoo : cha\u00eene fran\u00e7aise propos\u00e9e "
+                            u"en d\u00e9pannage (le match n'est pas garanti sur "
+                            u"cette cha\u00eene).".format(title, ch['title'])}
+        label_ = u'[B][COLOR gold]{0}[/COLOR][/B]'.format(ch['title'])
+        if epg_tag:
+            label_ += u' [COLOR cyan]\u00b7 {0}[/COLOR]'.format(epg_tag)
+        label_ += u' [COLOR gray]\u00b7 Vavoo[/COLOR]'
+        addDir(label_, payload, 'site_play',
                ch.get('logo') or poster, title, isFolder=False,
                infoLabels=info)
     return bool(chans)

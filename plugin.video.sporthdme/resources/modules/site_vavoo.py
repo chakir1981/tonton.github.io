@@ -39,9 +39,13 @@ Some channel names in the catalog carry a source suffix ("BEIN SPORTS 1
 grouped as several servers of the same channel, so if one source fails
 the user just picks the next one in the servers menu.
 
-Match fallback: fallback_channels(match_title) picks the French channels
-most likely broadcasting the match (sport/competition keyword rules) so
-default.py can offer them as "dépannage" sources for matches that have
+Match fallback: fallback_channels(match_title) finds the French channels
+actually broadcasting the match. Primary engine: the real French TV
+schedule (EPG from iptv-epg.org, cached 3 h) — the match's team names
+and competition are searched in the upcoming programmes of the French
+channels, best match first, with its airtime. Secondary engine: static
+sport/competition rules, used when the schedule is unreachable.
+default.py offers them as "dépannage" sources for matches that have
 no French channel of their own.
 """
 
@@ -140,12 +144,15 @@ def is_sport(name):
     return any(w in up for w in _SPORT_WORDS)
 
 
-# ---- match -> probable French channels (fallback feature) -------------------
+# ---- match -> chaînes françaises (rattachement Vavoo) ----------------------
 #
-# Les matchs sans aucune chaîne française reçoivent des chaînes Vavoo en
-# dépannage : on choisit les bouquets français les plus probables pour le
-# sport / la compétition du match. C'est une aide au zapping, pas une
-# grille TV : le match n'est pas garanti sur la chaîne proposée.
+# Deux moteurs, le meilleur d'abord :
+#   1. grille TV (EPG iptv-epg.org, cache 3 h) : les équipes / la compétition
+#      du match sont cherchées dans les programmes réels des chaînes
+#      françaises -> la chaîne qui diffuse vraiment le match, avec l'horaire ;
+#   2. heuristique (règles sport/compétition -> bouquets probables) en
+#      secours quand la grille ne dit rien.
+# C'est une aide au zapping : la grille peut changer, aucun résultat garanti.
 
 def _norm(s):
     """Minuscules/accents/ponctuation retirés : 'CANAL+ FOOT' -> 'CANAL FOOT'."""
@@ -241,18 +248,8 @@ def _fallback_patterns(label):
     return pats
 
 
-def fallback_channels(label, limit=6):
-    """Chaînes Vavoo françaises les plus probables pour un match.
-
-    label : titre du match (équipe, compétition...). Retourne une liste
-    (max `limit`) de dicts {'title', 'logo', 'urls'} — la même structure
-    que group_channels() — ou [] si le catalogue Vavoo est inaccessible.
-    Les chaînes sont choisies par préfixe de nom normalisé ( tokens),
-    variante la plus courte d'abord (BEIN SPORTS 1 plutôt que ... HD).
-    """
-    if not label:
-        return []
-    pats = _fallback_patterns(label)
+def _vavoo_index():
+    """Index des chaînes Vavoo France par nom normalisé (meilleure variante)."""
     items = []
     for group in (GROUP_SPORT, GROUP_ALL):
         try:
@@ -260,15 +257,24 @@ def fallback_channels(label, limit=6):
         except Exception:
             pass
     if not items:
-        return []
-    by_norm = {}
+        return {}
+    idx = {}
     for ch in group_channels(items):
         n = _norm(ch['title'])
         if not n:
             continue
-        cur = by_norm.get(n)
+        cur = idx.get(n)
         if cur is None or len(ch['urls']) > len(cur['urls']):
-            by_norm[n] = ch
+            idx[n] = ch
+    return idx
+
+
+def _heuristic_channels(label, limit=6):
+    """Ancien moteur (règles sport/compétition -> bouquets probables)."""
+    pats = _fallback_patterns(label)
+    by_norm = _vavoo_index()
+    if not by_norm:
+        return []
     out, used = [], set()
     for pat in pats:
         pt = _norm(pat).split()
@@ -286,6 +292,482 @@ def fallback_channels(label, limit=6):
         if best is not None:
             used.add(best[1])
             out.append(best[2])
+            if len(out) >= limit:
+                break
+    return out
+
+
+# ---- grille TV (EPG) : la chaîne qui diffuse vraiment le match --------------
+
+EPG_URL = u'https://iptv-epg.org/files/epg-fr.xml.gz'
+EPG_TTL = 3 * 3600.0      # la grille est retéléchargée au plus toutes les 3 h
+EPG_PAST = 2.5 * 3600.0   # un match commencé il y a moins de 2 h 30 reste proposé
+EPG_AHEAD = 11 * 3600.0   # et un match qui démarre dans les 11 h aussi
+
+_epg_cache = {'ts': 0.0, 'data': None}
+EPG_LAST_ERROR = u''
+
+# chaînes EPG retenues (les autres programmes sont ignorés au téléchargement)
+_EPG_KEEP_RE = re.compile(
+    u'BEIN|CANAL|DAZN|EUROSPORT|EQUIDIA|TF1|M6|W9|TMC|6TER|FRANCE [23]\\b|'
+    u"L.?EQUIPE|INFOSPORT|INFO SPORT|MULTISPORT|LIGUE|GOLF|RUGBY|TREK|FOOT",
+    re.I)
+
+# préfixes d'état des titres EPG (« A venir : … », « Terminé : … »)
+_EPG_STATE_RE = re.compile(u'^\\s*(?:A[\\s`\\u2019\\\']*v\\w*|Termin\\w*'
+                           u'|En direct\\w*)\\s*:\\s*', re.I | re.UNICODE)
+
+# synonymes : mot-clé de l'intitulé du match -> mots attendus dans la grille
+_COMP_SYNONYMS = (
+    (u'LIGUE DES CHAMPIONS|CHAMPIONS LEAGUE|UCL',
+     (u'CHAMPIONS', u'UEFA', u'LIGUE DES CHAMPIONS')),
+    (u'EUROPA|UEL', (u'EUROPA',)),
+    (u'CONFERENCE', (u'CONFERENCE',)),
+    (u'PREMIER LEAGUE', (u'PREMIER LEAGUE',)),
+    (u'CHAMPIONSHIP', (u'CHAMPIONSHIP',)),
+    (u'LIGUE 1|LIGUE1', (u'LIGUE 1',)),
+    (u'LIGUE 2', (u'LIGUE 2',)),
+    (u'BUNDESLIGA', (u'BUNDESLIGA',)),
+    (u'SERIE A', (u'SERIE A',)),
+    (u'LALIGA|LA LIGA|ESPAGNE|ESPAGNOL',
+     (u'LALIGA', u'LIGA', u'ESPAGNE', u'ESPAGNOL')),
+    (u'PRIMEIRA|PORTUGAL', (u'PORTUGAL',)),
+    (u'EREDIVISIE|PAYS BAS|NEERLANDAIS|HOLLAND',
+     (u'PAYS BAS', u'NEERLANDAIS', u'HOLLAND')),
+    (u'TOP 14', (u'TOP 14',)),
+    (u'PRO D2', (u'PRO D2',)),
+    (u'SIX NATIONS|TOURNOI DES 6|TOURNOI DES SIX',
+     (u'SIX NATIONS', u'6 NATIONS', u'TOURNOI DES')),
+    (u'COUPE DE FRANCE', (u'COUPE DE FRANCE',)),
+    (u'COUPE DE LA LIGUE|CARABAO|LEAGUE CUP',
+     (u'COUPE DE LA LIGUE', u'LEAGUE CUP', u'CARABAO')),
+    (u'NATIONS LEAGUE|LIGUE DES NATIONS',
+     (u'NATIONS LEAGUE', u'LIGUE DES NATIONS')),
+    (u'COUPE DU MONDE|WORLD CUP|MONDIAL',
+     (u'COUPE DU MONDE', u'WORLD CUP', u'MONDIAL')),
+    (u'FORMULE|FORMULA|\\bF1\\b',
+     (u'FORMULE 1', u'GRAND PRIX', u'F1')),
+    (u'MOTOGP|MOTO GP', (u'MOTO GP', u'MOTOGP')),
+    (u'WRC|RALLYE', (u'RALLYE',)),
+    (u'TENNIS|ATP|WTA', (u'TENNIS', u'ATP', u'WTA')),
+    (u'RUGBY', (u'RUGBY',)),
+    (u'CYCLISME|TOUR DE FRANCE|VUELTA|GIRO|UCI',
+     (u'CYCLISME', u'TOUR DE FRANCE', u'VUELTA', u'GIRO', u'UCI')),
+    (u'NBA|BASKET|WNBA', (u'NBA', u'BASKET', u'BASKETBALL', u'WNBA')),
+    (u'NFL|AMERICAIN', (u'NFL', u'AMERICAIN')),
+    (u'MLB|BASEBALL', (u'MLB', u'BASEBALL')),
+    (u'NHL|HOCKEY', (u'NHL', u'HOCKEY')),
+    (u'EUROLEAGUE', (u'EUROLEAGUE',)),
+    (u'HANDBALL', (u'HANDBALL',)),
+    (u'VOLLEY', (u'VOLLEY',)),
+    (u'BOXE|MMA|UFC', (u'BOXE', u'MMA', u'UFC')),
+    (u'SNOOKER', (u'SNOOKER',)),
+    (u'DARTS|FLECHETTES', (u'DARTS', u'FLECHETTES')),
+    (u'GOLF', (u'GOLF',)),
+    (u'HIPPIQUE|QUINTE|PMU|TROT', (u'PMU', u'HIPPIQUE', u'TROT', u'QUINTE')),
+    (u'AMICAL|FRIENDLY', (u'AMICAL', u'INTERNATIONAL', u'FRIENDLY')),
+    (u'QUALIFIC', (u'QUALIFICATIONS', u'QUALIFICATION')),
+    (u'NATATION', (u'NATATION',)),
+)
+
+# mots qui signalent une compétition (et jamais une équipe)
+_COMP_WORDS = frozenset((
+    u'FOOT', u'FOOTBALL', u'LIGUE', u'CHAMPIONS', u'CHAMPIONNAT',
+    u'CHAMPIONNATS', u'CHAMPIONSHIP', u'EUROPA', u'CONFERENCE', u'PREMIER',
+    u'BUNDESLIGA', u'SERIE', u'CALCIO', u'PRIMERA', u'PRIMEIRA', u'LALIGA',
+    u'LIGA', u'EREDIVISIE', u'TENNIS', u'ATP', u'WTA', u'ROLAND', u'WIMBLEDON',
+    u'RUGBY', u'TOP', u'PRO', u'BASKET', u'BASKETBALL', u'NBA', u'NFL', u'MLB',
+    u'NHL', u'HOCKEY', u'HANDBALL', u'VOLLEY', u'CYCLISME', u'CYCLING', u'TOUR',
+    u'FORMULE', u'FORMULA', u'MOTOGP', u'MOTO', u'GRAND', u'PRIX', u'BOXE',
+    u'MMA', u'UFC', u'GOLF', u'SNOOKER', u'DARTS', u'AMICAL', u'MATCH',
+    u'FRIENDLY', u'QUALIFICATION', u'QUALIFICATIONS', u'WORLD', u'CUP',
+    u'COUPE', u'NATIONS', u'EURO', u'OLYMPIC', u'OLYMPIQUE', u'ESPORT',
+    u'MASTERS', u'DE', u'DES', u'DU', u'LA', u'LE', u'LES', u'SIX',
+))
+
+# séparateurs d'équipes dans une tranche BRUTE d'intitulé : 'A vs B',
+# 'A / B', 'A @ B', 'A - B' (découpage avant normalisation)
+_TEAM_SPLIT_RE = re.compile(u'\\s+(?:vs|v|x|@)\\s+|\\s*/\\s*|\\s+[-\u2013]\\s+',
+                            re.UNICODE | re.IGNORECASE)
+
+# sigles de clubs trop courts pour être gardés par la longueur minimale
+_TEAM_ACRONYMS = frozenset((u'OM', u'OL', u'PSG', u'ASSE', u'LOSC', u'RCL',
+                            u'OGCN', u'MHSC', u'SRFC', u'FCN', u'SB29'))
+
+# mots à ignorer dans un nom d'équipe
+_TEAM_STOP = frozenset((u'EN', u'DIRECT', u'LIVE', u'HD', u'4K', u'SD',
+                        u'STREAM', u'VS', u'V', u'X', u'AND', u'GRATUIT',
+                        u'LINK', u'LINKS', u'THE'))
+
+
+def _is_comp_part(part):
+    """Une tranche d'intitulé qui parle de compétition, pas d'équipes."""
+    toks = part.split()
+    if not toks:
+        return True
+    hits = sum(1 for t in toks if t in _COMP_WORDS)
+    return hits * 2 >= len(toks)
+
+
+def _team_ok(tok):
+    if not tok or len(tok) < 3:
+        return tok in _TEAM_ACRONYMS
+    if tok in _COMP_WORDS or tok in _TEAM_STOP:
+        return False
+    return not tok.isdigit()
+
+
+def _match_teams(label):
+    """(équipes, texte compétition) extraits d'un intitulé de match.
+
+    'Real Madrid vs Inter - Ligue des Champions' ->
+    (['REAL MADRID', 'INTER'], 'LIGUE DES CHAMPIONS')
+    """
+    # découpage sur le libellé BRUT : _norm() remplace les tirets par des
+    # espaces, les séparateurs ' - ' seraient perdus sinon
+    raw = six.ensure_text(label or u'', encoding='utf-8',
+                          errors='replace').strip()
+    if not raw:
+        return [], u''
+    raw = raw.replace(u',', u' - ')
+    parts_raw = [p for p in re.split(u'\\s+[-\u2013|]\\s+', raw) if p.strip()]
+    pairs = [(p, _norm(p)) for p in parts_raw]
+    pairs = [(pr, pt) for pr, pt in pairs if pt]
+    team_parts = [pr for pr, pt in pairs if not _is_comp_part(pt)]
+    comp_parts = [pr for pr, pt in pairs if _is_comp_part(pt)]
+    if not team_parts:
+        return [], u' '.join(pt for _, pt in pairs if _is_comp_part(pt))
+    teams = []
+    for pr in team_parts:
+        for tok in _TEAM_SPLIT_RE.split(pr):
+            nt = _norm(tok)
+            if len(nt.split()) > 1:
+                nt = _team_clean(nt)
+            if _team_ok(nt) and nt not in teams:
+                teams.append(nt)
+    return teams, u' '.join(pt for _, pt in pairs if _is_comp_part(pt))
+
+
+def _comp_keys(text):
+    """Mots attendus dans la grille TV pour la compétition du match."""
+    text = text or u''
+    if not text:
+        return []
+    keys = []
+    for rx, pats in _COMP_SYNONYMS:
+        try:
+            hit = re.search(rx, text)
+        except Exception:
+            hit = None
+        if hit:
+            for p in pats:
+                if p not in keys:
+                    keys.append(p)
+    return keys
+
+
+# clés de compétition trop génériques : elles correspondaient à des
+# émissions sans rapport (« Grand Prix ISU » de patinage, « international »
+# d'une federation...) -> poids réduit
+_COMP_WEAK = frozenset((
+    u'GRAND PRIX', u'INTERNATIONAL', u'FRIENDLY', u'QUALIFICATION',
+    u'QUALIFICATIONS', u'TOURNOI DES', u'ESPAGNE', u'ESPAGNOL', u'HOLLAND',
+    u'NEERLANDAIS', u'PAYS BAS', u'AMICAL', u'PORTUGAL', u'MONDIAL',
+))
+
+
+def _team_needles(teams):
+    """Aiguilles de recherche par équipe : (indice d'équipe, phrase, poids).
+
+    La phrase complète pèse plus lourd qu'un seul mot long (Toulouse 8 lettres
+    est fiable, City l'est moins). Un mot seul de moins de 5 lettres est
+    trop ambigu pour être cherché tout seul."""
+    needles = []
+    for i, t in enumerate(teams):
+        needles.append((i, t, 60 + min(20, len(t))))
+        for tok in t.split():
+            if len(tok) >= 5 and tok not in _COMP_WORDS and tok not in _TEAM_STOP:
+                needles.append((i, tok, 40 + min(15, len(tok))))
+    return needles
+
+
+def _team_clean(phrase):
+    """Retire les mots de compétition collés à un nom d'équipe :
+    'TOP 14 RUGBY TOULOUSE' -> 'TOULOUSE'."""
+    toks = [t for t in phrase.split()
+            if t not in _COMP_WORDS and t not in _TEAM_STOP
+            and not t.isdigit()]
+    return u' '.join(toks)
+
+
+def _epg_score(title, desc, needles, comp_keys, start, stop, now):
+    """Score d'un programme de la grille pour ce match (0 = aucun intérêt).
+
+    Les correspondances trouvées dans le TITRE comptent poids entier, celles
+    de la DESCRIPTION moitié (une description cite souvent des clubs sans
+    diffuser le match)."""
+    def _match_weight(text, factor):
+        matched = {}
+        for idx, phrase, w in needles:
+            try:
+                if re.search(u'\\b' + re.escape(phrase) + u'\\b', text):
+                    if w * factor > matched.get(idx, 0):
+                        matched[idx] = w * factor
+            except Exception:
+                pass
+        return matched
+
+    matched = _match_weight(title, 1.0)
+    for idx, w in _match_weight(desc or u'', 0.5).items():
+        if w > matched.get(idx, 0):
+            matched[idx] = w
+    score = 0
+    if len(matched) >= 2:
+        score = 100
+    elif matched:
+        score = max(matched.values())
+    if not score and comp_keys:
+        best = 0
+        for k in comp_keys:
+            try:
+                if re.search(u'\\b' + re.escape(k) + u'\\b', title):
+                    best = 18 if k in _COMP_WEAK else 30
+                    break
+            except Exception:
+                pass
+        if not best:
+            for k in comp_keys:
+                try:
+                    if re.search(u'\\b' + re.escape(k) + u'\\b', desc or u''):
+                        best = 9 if k in _COMP_WEAK else 15
+                        break
+                except Exception:
+                    pass
+        score = best
+    if not score:
+        return 0
+    if start <= now <= stop:
+        score += 5   # diffusé en ce moment
+    return score
+
+
+def _xmltv_ts(value):
+    """'20261101211500 +0100' -> epoch UTC (secondes), ou 0."""
+    try:
+        digits = re.match(r'(\d{14})', value or '')
+        if not digits:
+            return 0
+        import calendar
+        t = calendar.timegm(time.strptime(digits.group(1), '%Y%m%d%H%M%S'))
+        return t
+    except Exception:
+        return 0
+
+
+def _epg_download():
+    """Télécharge et décode la grille TV France (XMLTV compressé)."""
+    import gzip as _gzip
+    import io as _io
+    import xml.etree.ElementTree as ET
+    import requests
+    try:
+        requests.packages.urllib3.disable_warnings()
+    except Exception:
+        pass
+    r = requests.get(EPG_URL, timeout=(10, 90),
+                     headers={'User-Agent': UA_BROWSER,
+                              'Accept-Encoding': 'identity'}, verify=False)
+    r.raise_for_status()
+    gz = _gzip.GzipFile(fileobj=_io.BytesIO(r.content))
+    chan, prog, kept = {}, [], {}
+    now = time.time()
+    root = None
+    for ev, el in ET.iterparse(gz, events=('start', 'end')):
+        if ev == 'start':
+            if root is None:
+                root = el
+            continue
+        tag = el.tag.rsplit('}', 1)[-1]
+        if tag == 'channel':
+            cid = el.get('id') or ''
+            dn = ''
+            de = el.find('display-name')
+            if de is not None and de.text:
+                dn = de.text.strip()
+            if cid and dn:
+                if dn.startswith(u'FR - '):
+                    dn = dn[5:]
+                ok = not cid.endswith(u'+1') and not dn.endswith(u'+1') \
+                    and _EPG_KEEP_RE.search(dn)
+                kept[cid] = dn if ok else None
+                if ok:
+                    chan[cid] = dn
+            el.clear()
+        elif tag == 'programme':
+            cid = el.get('channel') or ''
+            st = _xmltv_ts(el.get('start'))
+            sp = _xmltv_ts(el.get('stop'))
+            if cid in kept and kept[cid] and st and sp and sp >= now - 6 * 3600:
+                te = el.find('title')
+                raw = (te.text or u'').strip() if te is not None \
+                    and te.text else u''
+                if raw:
+                    raw = _EPG_STATE_RE.sub(u'', raw).strip()
+                    title = _norm(raw)
+                    if title:
+                        de = el.find('desc')
+                        desc = _norm(de.text)[:240] \
+                            if de is not None and de.text else u''
+                        prog.append((st, sp, cid, title, desc, raw))
+            el.clear()
+    if root is not None:
+        try:
+            root.clear()
+        except Exception:
+            pass
+    return {'chan': chan, 'prog': prog}
+
+
+def _epg_load():
+    """Grille TV en cache (max EPG_TTL), téléchargement à l'usage seulement."""
+    now = time.time()
+    if _epg_cache['data'] and now - _epg_cache['ts'] < EPG_TTL:
+        return _epg_cache['data']
+    global EPG_LAST_ERROR
+    try:
+        data = _epg_download()
+    except Exception as exc:
+        EPG_LAST_ERROR = _errstr(exc)
+        return _epg_cache['data']   # grille périmée vaut mieux que rien
+    if data.get('prog'):
+        _epg_cache['ts'] = now
+        _epg_cache['data'] = data
+        EPG_LAST_ERROR = u''
+        return data
+    EPG_LAST_ERROR = u'grille TV vide (iptv-epg.org)'
+    return _epg_cache['data']
+
+
+_EPG_ALIAS = {u'CANAL': u'CANAL PREMIERE', u'CANAL PLUS': u'CANAL PREMIERE'}
+_EPG_QUALITY = (u'HD', u'FHD', u'UHD', u'SD', u'4K')
+
+
+def _map_epg_channel(dn, vav_idx):
+    """Chaîne Vavoo correspondant à un nom de chaîne de la grille TV."""
+    n = _norm(dn)
+    if not n:
+        return None
+    if n in vav_idx:
+        return vav_idx[n]
+    toks = n.split()
+    while toks and toks[-1] in _EPG_QUALITY:
+        toks = toks[:-1]
+        n2 = u' '.join(toks)
+        if n2 in vav_idx:
+            return vav_idx[n2]
+    if not toks:
+        return None
+    n2 = _EPG_ALIAS.get(u' '.join(toks))
+    if n2 and n2 in vav_idx:
+        return vav_idx[n2]
+    # préfixe exact : nom Vavoo qui commence par le nom EPG ('TF1' -> 'TF1 FHD')
+    cands = [k for k in vav_idx
+             if len(k.split()) > len(toks) and k.split()[:len(toks)] == toks]
+    if len(cands) == 1:
+        return vav_idx[cands[0]]
+    # réciproque : nom EPG plus long ('FRANCE 3 ALPES' -> 'FRANCE 3')
+    if len(toks) > 1:
+        for k in vav_idx:
+            t2 = k.split()
+            if len(t2) >= 2 and toks[:len(t2)] == t2:
+                return vav_idx[k]
+    return None
+
+
+def _epg_channels(label, vav_idx, limit=6):
+    """Chaînes Vavoo qui diffusent (ou diffuseront) ce match, selon la grille.
+
+    Chaque dict retourné ajoute 'epg_start'/'epg_stop' (epoch UTC) et
+    'epg_title' (libellé du programme) au format {'title','logo','urls'}."""
+    data = _epg_load()
+    if not data or not data.get('prog'):
+        return []
+    teams, comp_text = _match_teams(label)
+    comp_keys = _comp_keys(comp_text or label)
+    if not teams and not comp_keys:
+        return []
+    needles = _team_needles(teams)
+    chan_map = {}
+    for cid, dn in data['chan'].items():
+        ch = _map_epg_channel(dn, vav_idx)
+        if ch:
+            chan_map[cid] = ch
+    now = time.time()
+    lo, hi = now - EPG_PAST, now + EPG_AHEAD
+    hits = {}
+    for st, sp, cid, title, desc, raw in data['prog']:
+        if st > hi or sp < lo:
+            continue
+        ch = chan_map.get(cid)
+        if not ch:
+            continue
+        s = _epg_score(title, desc, needles, comp_keys, st, sp, now)
+        if not s:
+            continue
+        cur = hits.get(cid)
+        if cur is None or s > cur[0]:
+            hits[cid] = (s, st, sp, raw)
+    ranked = sorted(hits.items(),
+                    key=lambda kv: (-kv[1][0], abs(kv[1][1] - now)))
+    out = []
+    for cid, (s, st, sp, raw) in ranked:
+        ch = dict(chan_map[cid])
+        ch['epg_start'] = int(st)
+        ch['epg_stop'] = int(sp)
+        ch['epg_title'] = raw
+        ch['epg_score'] = s
+        out.append(ch)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def fallback_channels(label, limit=6):
+    """Chaînes Vavoo françaises les plus probables pour un match.
+
+    label : titre du match (équipes, compétition...). Retourne une liste
+    (max `limit`) de dicts {'title', 'logo', 'urls'} — la même structure
+    que group_channels() — ou [] si le catalogue Vavoo est inaccessible.
+    1) chaînes trouvées dans la grille TV (programme correspondant aux
+       équipes / à la compétition, horaire inclus) ;
+    2) complétées par l'heuristique sport/compétition si la grille
+       n'a rien donné (ou n'est pas accessible).
+    """
+    if not label:
+        return []
+    vav_idx = _vavoo_index()
+    if not vav_idx:
+        return []
+    out, used = [], set()
+    try:
+        epg = _epg_channels(label, vav_idx, limit=limit)
+    except Exception:
+        epg = []
+    for ch in epg:
+        n = _norm(ch['title'])
+        if not n or n in used:
+            continue
+        out.append(ch)
+        used.add(n)
+        if len(out) >= limit:
+            break
+    if len(out) < limit:
+        for ch in _heuristic_channels(label, limit * 2):
+            n = _norm(ch['title'])
+            if not n or n in used:
+                continue
+            out.append(ch)
+            used.add(n)
             if len(out) >= limit:
                 break
     return out
@@ -594,7 +1076,19 @@ def diagnostic():
                         u'vide (normal au premier essai)'))
     except Exception as exc:
         out.append((u'Cache local', False, _errstr(exc)))
-    # 4) lecture test (resolve) sur la première chaîne du catalogue
+    # 4) grille TV (EPG) du rattachement Vavoo -> matchs
+    try:
+        data = _epg_load()
+        if data and data.get('prog'):
+            out.append((u'Grille TV (rattachement Vavoo)', True,
+                        u'{0} programmes, {1} chaînes suivies'
+                        .format(len(data['prog']), len(data['chan']))))
+        else:
+            out.append((u'Grille TV (rattachement Vavoo)', False,
+                        EPG_LAST_ERROR or u'indisponible (règles de secours utilisées)'))
+    except Exception as exc:
+        out.append((u'Grille TV (rattachement Vavoo)', False, _errstr(exc)))
+    # 5) lecture test (resolve) sur la première chaîne du catalogue
     try:
         items = _catalog('', GROUP_SPORT)
         url = items[0].get('url') if items else ''
@@ -735,6 +1229,9 @@ if __name__ == '__main__':
     assert _p[0] == u'TF1', _p
     # rien de reconnu -> bouquets football génériques
     assert _fallback_patterns(u'Club A vs Club B')[0] == u'BEIN SPORTS 1'
+    # l'auto-test ne doit jamais télécharger la grille TV
+    _epg_cache['ts'] = time.time()
+    _epg_cache['data'] = {'chan': {}, 'prog': []}
     # fallback_channels sur un catalogue factice
     _fake = [
         {'name': 'BEIN SPORTS 1 .b', 'url': 'u1', 'logo': 'l'},
@@ -777,4 +1274,76 @@ if __name__ == '__main__':
         assert fallback_channels(u'PSG vs OM') == []
     finally:
         _cached_channels = _old
+    # ---- matching grille TV (pure parts) ------------------------------------
+    _t, _c = _match_teams(u'Real Madrid vs Inter - Ligue des Champions')
+    assert _t == [u'REAL MADRID', u'INTER'], _t
+    assert u'LIGUE DES CHAMPIONS' in _c, _c
+    _t, _c = _match_teams(u'France - Belgique, match amical')
+    assert _t == [u'FRANCE', u'BELGIQUE'], _t
+    assert u'AMICAL' in _c, _c
+    _t, _c = _match_teams(u'Aston Villa / Fulham - Premier League')
+    assert _t == [u'ASTON VILLA', u'FULHAM'], _t
+    _t, _c = _match_teams(u'Tennis - ATP Paris Masters')
+    assert _t == [], _t
+    assert u'ATP' in _c and u'TENNIS' in _c, _c
+    _t, _c = _match_teams(u'PSG vs OM - Ligue 1')
+    assert _t == [u'PSG', u'OM'], _t
+    assert _comp_keys(u'LIGUE DES CHAMPIONS')[0] == u'CHAMPIONS'
+    assert _comp_keys(u'') == []
+    # aiguilles d'équipes : phrase complète plus lourde qu'un mot seul
+    _nd = _team_needles([u'REAL MADRID', u'INTER'])
+    assert (0, u'REAL MADRID', 71) in _nd, _nd
+    assert (1, u'INTER', 65) in _nd, _nd
+    # mapping grille TV -> chaînes Vavoo
+    _vidx = {u'BEIN SPORTS 1': {'title': u'BEIN SPORTS 1', 'urls': ['a'],
+                                'logo': ''},
+             u'FRANCE 3': {'title': u'FRANCE 3', 'urls': ['b'], 'logo': ''},
+             u'CANAL LIVE 1': {'title': u'CANAL+ LIVE 1', 'urls': ['c'],
+                               'logo': ''},
+             u'CANAL PREMIERE': {'title': u'CANAL PREMIERE', 'urls': ['d'],
+                                 'logo': ''},
+             u'TF1 FHD': {'title': u'TF1 FHD', 'urls': ['e'], 'logo': ''}}
+    assert _map_epg_channel(u'beIN SPORTS 1', _vidx)['title'] == u'BEIN SPORTS 1'
+    assert _map_epg_channel(u'FRANCE 3 - Alpes', _vidx)['title'] == u'FRANCE 3'
+    assert _map_epg_channel(u'CANAL+LIVE 1', _vidx)['title'] == u'CANAL+ LIVE 1'
+    assert _map_epg_channel(u'CANAL+', _vidx)['title'] == u'CANAL PREMIERE'
+    assert _map_epg_channel(u'TF1', _vidx)['title'] == u'TF1 FHD'
+    assert _map_epg_channel(u'CANAL+ Kids', _vidx) is None
+    # horodatage XMLTV : 14 chiffres = UTC, le suffixe fuseau est ignoré
+    assert _xmltv_ts(u'20261101211500 +0100') == \
+        _xmltv_ts(u'20261101211500 +0000')
+    assert _xmltv_ts(u'20261101211500 +0100') == 1793567700
+    assert _xmltv_ts(u'') == 0 and _xmltv_ts(None) == 0
+    # recherche EPG de bout en bout sur une grille factice
+    _now = time.time()
+    _old_idx = _cached_channels
+    _cached_channels = lambda g: [  # noqa: E731
+        {'name': u'BEIN SPORTS 1 .b', 'url': 'u1', 'logo': ''},
+        {'name': u'TF1 FHD', 'url': 'u2', 'logo': ''}]
+    try:
+        _epg_cache['ts'] = _now
+        _epg_cache['data'] = {
+            'chan': {'beINSPORTS1.fr': u'beIN SPORTS 1', 'TF1.fr': u'TF1'},
+            'prog': [(_now - 600, _now + 5400, 'beINSPORTS1.fr',
+                      u'FOOTBALL LIGUE DES CHAMPIONS REAL MADRID INTER', u'',
+                      u'Football : Ligue des Champions'),
+                     (_now + 7200, _now + 10800, 'TF1.fr',
+                      u'FOOTBALL AMICAL FRANCE BELGIQUE', u'',
+                      u'Football : match amical')]}
+        _fb = fallback_channels(u'Real Madrid vs Inter - Ligue des Champions')
+        assert _fb[0]['title'] == u'BEIN SPORTS 1', _fb
+        assert _fb[0].get('epg_score', 0) >= 100, _fb
+        assert u'Ligue des Champions' in _fb[0].get('epg_title', u''), _fb
+        assert 'epg_start' in _fb[0] and 'epg_stop' in _fb[0], _fb
+        _fb = fallback_channels(u'France - Belgique, match amical')
+        assert _fb[0]['title'] == u'TF1 FHD', _fb
+        # grille muette -> l'heuristique reprend la main
+        _epg_cache['data'] = {'chan': {}, 'prog': []}
+        _fb = fallback_channels(u'Real Madrid vs Inter - Ligue des Champions')
+        assert _fb[0]['title'] == u'BEIN SPORTS 1', _fb
+        assert 'epg_score' not in _fb[0], _fb
+    finally:
+        _cached_channels = _old_idx
+        _epg_cache['ts'] = 0.0
+        _epg_cache['data'] = None
     print('ok')

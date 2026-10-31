@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="2.1.0" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="2.1.1" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -16,8 +16,11 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
-      [B]v2.1.0[/B] 01/11/2026
-- Nouveau : rattachement des chaînes Vavoo aux matchs sans source française. Les matchs qui n'ont aucune chaîne française ne disparaissent plus : ils restent affichés avec une balise [Vavoo] et, à l'ouverture, proposent des chaînes Vavoo de dépannage (beIN Sports, Canal+, RMC Sport, L'Équipe, TF1/M6, Eurosport, DAZN…) choisies selon le sport et la compétition (Ligue 1 → Canal+/DAZN, Premier League → RMC Sport, rugby → Canal+ Sport, tennis/cyclisme → Eurosport, sélections nationales → TF1/M6…).
+      [B]v2.1.1[/B] 01/11/2026
+- Les chaînes Vavoo proposées en dépannage sont maintenant choisies grâce à la vraie grille des programmes TV : les équipes du match sont recherchées dans les programmes réels des chaînes françaises (EPG France) et c'est la chaîne qui diffuse vraiment le match qui arrive en première, avec son horaire — par exemple « Aston Villa / Fulham » propose Canal+ Premier League et Canal+ Live 6 à 20h55, une affiche de Bundesliga propose beIN Sports 1. Les règles par sport/compétition restent utilisées en secours quand la grille est indisponible.
+- L'horaire du programme (ou « en direct ») s'affiche à côté de chaque chaîne proposée, et le libellé du programme TV figure dans sa description.
+- Le Diagnostic Vavoo affiche l'état de la grille TV (programmes chargés, chaînes suivies).
+- v2.1.0 : rattachement des chaînes Vavoo aux matchs sans source française — balise [Vavoo], chaînes de dépannage selon le sport et la compétition, essai automatique des variantes de la chaîne, réglage activé par défaut.
 - La lecture d'une chaîne Vavoo de dépannage essaie automatiquement les variantes de la chaîne si la première ne répond pas.
 - Nouveau réglage « Rattacher les chaînes Vavoo aux matchs sans source française (dépannage) » dans les paramètres (activé par défaut ; le comportement d'avant — masquer ces matchs — revient en le désactivant).
 - v2.0.9 : correctif — les chaînes Vavoo n'étaient plus masquées par le filtre « sources françaises » ; nouvel outil « Diagnostic Vavoo (dépannage) » (catalogue, signature, cache, lecture) avec vidage du cache.
