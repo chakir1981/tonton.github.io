@@ -112,6 +112,10 @@ def Main_menu():
                        'plot': u'Angleterre, Espagne, Italie, Allemagne, Portugal — '
                                u'uniquement les matchs diffusés sur une chaîne '
                                u'française (Canal+ Foot, beIN, RMC Sport...).'})
+    addDir(u'[B][COLOR gold]CHAÎNES FRANÇAISES[/COLOR][/B]', 'fr', 'fr_channels', ICON, FANART, True,
+           infoLabels={'title': u'Chaînes françaises',
+                       'plot': u'Parcourir par chaîne : Canal+ Foot, Ligue1+, beIN, RMC — '
+                               u'chaque chaîne liste les matchs qu\u2019elle diffuse.'})
     for _s in EXTRA_SITES:
         addDir('[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(_s.NAME),
                _s.KEY, 'site_events', ICON, FANART, True,
@@ -146,7 +150,7 @@ def _matches_from_page(url):
     return json.loads(re.findall(old_pattern, events.replace(',false', ''), re.DOTALL)[0])
 
 
-def get_events(url, league_rx=None, league_label=u''):  # 5
+def get_events(url, league_rx=None, league_label=u'', channel_name=None):  # 5
     matches = None
     if url != Live_fallback_url:
         try:
@@ -190,6 +194,8 @@ def get_events(url, league_rx=None, league_label=u''):  # 5
             continue
         league_total += 1
         channels = match.get("channels", [])
+        if channel_name is not None and not _match_has_channel(match, channel_name):
+            continue
         if fr_only and not _channels_have_french(channels):
             filtered_out += 1
             continue
@@ -232,7 +238,11 @@ def get_events(url, league_rx=None, league_label=u''):  # 5
 
         # streams = str(quote(base64.b64encode(six.ensure_binary(str(streams)))))
     if not event_list:
-        if league_rx is not None:
+        if channel_name is not None:
+            control.infoDialog(
+                u"[COLOR gold]Aucun match sur {0} pour le moment.[/COLOR]"
+                .format(channel_name), NAME, ICON, 6000)
+        elif league_rx is not None:
             if league_total:
                 control.infoDialog(
                     u"[COLOR gold]Aucune source française pour {0} aujourd'hui.[/COLOR]\n"
@@ -991,6 +1001,74 @@ def addDir(name, url, mode, iconimage, description, isFolder=True, infoLabels=No
     xbmcplugin.addDirectoryItem(_handle, url=u, listitem=liz, isFolder=isFolder)
 
 
+def _match_has_channel(match, channel_name):
+    """True si ce match est diffusé sur la chaîne nommée channel_name."""
+    for c in match.get('channels', []):
+        if isinstance(c, dict):
+            nm = six.ensure_text(c.get('name') or u'', encoding='utf-8', errors='replace').strip()
+            if nm == channel_name:
+                return True
+    return False
+
+
+def _fr_channel_index():
+    """Index inversé « chaîne française -> matchs » : les mêmes sources que
+    ÉVÉNEMENTS EN DIRECT, parcourues dans l'autre sens. Retourne un dict
+    {nom de chaîne: [match, ...]} ; une chaîne n'y figure que si la source
+    la liste réellement (Canal+ Foot, Ligue1+, beIN France, RMC...)."""
+    matches = None
+    try:
+        matches = _matches_from_page(Live_url)
+    except Exception as e:
+        log_info('channel index page {0} failed: {1!r}'.format(Live_url, e))
+    if not matches:
+        try:
+            matches = requests.get(Live_fallback_url, headers={'User-Agent': client.agent()},
+                                   timeout=20).json().get('matches')
+        except Exception as e:
+            log_info('channel index fallback {0} failed: {1!r}'.format(Live_fallback_url, e))
+    idx = {}
+    for m in matches or []:
+        for c in m.get('channels', []):
+            if isinstance(c, dict) and _is_french_source(c.get('name'), c.get('language')):
+                nm = six.ensure_text(c.get('name') or u'', encoding='utf-8',
+                                     errors='replace').strip()
+                if nm:
+                    idx.setdefault(nm, []).append(m)
+    return idx
+
+
+def fr_channels_menu():
+    idx = _fr_channel_index()
+    if not idx:
+        control.infoDialog(u"[COLOR gold]Aucune chaîne française dans les sources du moment.\n"
+                           u"Elles apparaissent dès qu'une télé française diffuse un match.[/COLOR]",
+                           NAME, ICON, 6000)
+        xbmcplugin.setContent(_handle, 'movies')
+        xbmcplugin.endOfDirectory(_handle)
+        return
+    seen = set()
+    total = 0
+    for ms in idx.values():
+        for m in ms:
+            key = (m.get('team1'), m.get('team2'), m.get('startTimestamp'))
+            if key not in seen:
+                seen.add(key)
+                total += 1
+    for nm in sorted(idx, key=lambda n: (-len(idx[n]), n.lower())):
+        ms = idx[nm]
+        addDir(u'[B][COLOR gold]{0}[/COLOR][/B] [COLOR grey]({1} match{2})[/COLOR]'.format(
+                   nm, len(ms), u's' if len(ms) > 1 else u''),
+               nm, 'fr_channel_matches', ICON, FANART, True,
+               infoLabels={'title': nm,
+                           'plot': u'{0} match(s) diffusé(s) sur cette chaîne en ce moment.'
+                                   .format(len(ms))})
+    control.infoDialog(u"[COLOR lime]{0} chaîne(s) française(s) — {1} match(s) au total.[/COLOR]"
+                       .format(len(idx), total), NAME, ICON, 3000)
+    xbmcplugin.setContent(_handle, 'movies')
+    xbmcplugin.endOfDirectory(_handle)
+
+
 def leagues_menu():
     for name, desc, _rx in LEAGUE_MENU:
         addDir(u'[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(name),
@@ -1194,6 +1272,10 @@ def router(paramstring):
             entry = LEAGUES.get(params.get('url', u''))
             if entry:
                 get_events(Live_url, league_rx=entry[1], league_label=params['url'])
+        elif params['mode'] == 'fr_channels':
+            fr_channels_menu()
+        elif params['mode'] == 'fr_channel_matches':
+            get_events(Live_url, channel_name=params.get('url', u''))
         elif params['mode'] == 'get_streams':
             get_stream(params['name'], params['url'])
         elif params['mode'] == 'play_stream':
