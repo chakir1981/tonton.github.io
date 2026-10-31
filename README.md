@@ -12,7 +12,7 @@ Vous pouvez m'offrir un ☕ ou une 🍺 : https://pastebin.com/raw/9J1KGKsj
 
 [Rejoignez-nous sur Telegram](http://bit.ly/bug_telegram)
 
-[Télécharger le dépôt v2.9](https://raw.githubusercontent.com/chakir1981/tonton.github.io/master/repository.bugatsinho-2.9.zip)
+[Télécharger le dépôt v2.9.1](https://raw.githubusercontent.com/chakir1981/tonton.github.io/master/repository.bugatsinho-2.9.1.zip)
 
 [S'inscrire sur Real Debrid](http://real-debrid.com/?id=1168800)
 

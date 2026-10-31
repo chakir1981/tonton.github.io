@@ -1,5 +1,5 @@
 <addons>
-	<addon id="repository.bugatsinho" name="Dépôt Bugatsinho" version="2.9" provider-name="Bugatsinho">
+	<addon id="repository.bugatsinho" name="Dépôt Bugatsinho" version="2.9.1" provider-name="Bugatsinho">
 		<extension point="xbmc.addon.repository" name="Dépôt Bugatsinho">
 			<dir>
 				<info compressed="false">https://raw.githubusercontent.com/chakir1981/tonton.github.io/master/addons.xml</info>
