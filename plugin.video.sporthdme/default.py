@@ -358,6 +358,22 @@ def _servers_have_french(servers):
     return False
 
 
+# Les trois miroirs du service principal sont affichés discrètement
+# « un », « deux », « trois » au lieu des domaines réels.
+_MIRROR_LABELS = ((r'vertex\.st', u'un'), (r'nexa\.st', u'deux'), (r'kora\.st', u'trois'))
+
+
+def _link_label(link):
+    """Libellé affiché après le nom de la chaîne : « un / deux / trois »
+    pour les miroirs vertex.st / nexa.st / kora.st (sous-domaines inclus,
+    ex. s1.nexa.st), sinon le domaine réel."""
+    host = (urlparse(link).netloc or '').lower()
+    for rx, lbl in _MIRROR_LABELS:
+        if re.search(r'(?:^|\.)' + rx + '$', host):
+            return lbl
+    return host
+
+
 def get_stream(name, url):  # 4
     data = six.ensure_text(base64.b64decode(unquote(url))).strip('\n')
 
@@ -402,7 +418,7 @@ def get_stream(name, url):  # 4
                 if not 'vecdn' in link:
                     # if not 'https://bedsport' in link and not 'vecdn' in link:
                     if not str(link) == str(title):
-                        title += ' | {}'.format(urlparse(link).netloc)
+                        title += ' | {}'.format(_link_label(link))
                 info = {'title': title, 'sorttitle': '', 'plot': name}
                 addDir(title, link, 'play_stream', ICON, name, isFolder=False, infoLabels=info)
             xbmcplugin.setContent(_handle, 'videos')
