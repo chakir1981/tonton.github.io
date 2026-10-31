@@ -17,6 +17,7 @@ from resources.modules import control, client
 from resources.modules import site_embedlivesports
 from resources.modules import site_futbollibre
 from resources.modules import site_futbolmov
+from resources.modules import site_iptv
 import time
 from dateutil.parser import parse
 from dateutil.tz import gettz
@@ -30,6 +31,8 @@ EXTRA_SITES = [site_embedlivesports, site_futbollibre]
 SITES = {s.KEY: s for s in EXTRA_SITES}
 # futbol-libre.mov: one main-menu entry -> its three lists (fmov_menu)
 SITES.update((s.KEY, s) for s in site_futbolmov.SUBSITES)
+# iptv-org live channels: one main-menu entry -> its three lists (iptv_menu)
+SITES.update((s.KEY, s) for s in site_iptv.SUBSITES)
 
 _url = sys.argv[0]
 _handle = int(sys.argv[1])
@@ -98,6 +101,9 @@ def Main_menu():
     addDir('[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(site_futbolmov.NAME),
            'fmov', 'fmov_menu', ICON, FANART, True,
            infoLabels={'title': site_futbolmov.NAME, 'plot': site_futbolmov.DESC})
+    addDir('[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(site_iptv.NAME),
+           'iptv', 'iptv_menu', ICON, FANART, True,
+           infoLabels={'title': site_iptv.NAME, 'plot': site_iptv.DESC})
     # addDir('[B][COLOR gold]Alternative VIEW [/COLOR][/B]', '', '', ICON, FANART, '')
     # addDir('[B][COLOR gold]Alternative LIVE EVENTS[/COLOR][/B]', Alt_url, 15, ICON, FANART, '')
     # addDir('[B][COLOR white]SPORTS[/COLOR][/B]', '', 3, ICON, FANART, '')
@@ -983,7 +989,8 @@ def site_events_menu(key):
     fr_only = _french_only()
     shown = 0
     for e in events:
-        if fr_only and e.get('servers') and not _servers_have_french(e.get('servers')):
+        if fr_only and not getattr(site, 'NO_FR_FILTER', False) \
+                and e.get('servers') and not _servers_have_french(e.get('servers')):
             continue
         _add_site_event(key, site, e)
         shown += 1
@@ -996,7 +1003,8 @@ def site_events_menu(key):
 def _add_site_event(key, site, e):
     # title colour signals state: cyan = live, gold = upcoming, grey = finished.
     colors = {'live': 'cyan', 'soon': 'gold', 'done': 'grey'}
-    t = time_convert(e['start_ms']) if e['start_ms'] else u'-'
+    # start_ms 0/None = live 24/7 channel (IPTV module): no time slot at all
+    t = time_convert(e['start_ms']) if e.get('start_ms') else u''
     # event titles carry accents/ñ (España, Brasil...) -> keep every piece
     # unicode so the byte-str .format() can't fall back to the ascii codec.
     tag = six.ensure_text(e.get('code') or e.get('league') or '',
@@ -1023,6 +1031,14 @@ def fmov_menu():
                infoLabels={'title': s.NAME, 'plot': s.DESC})
     addDir(u'[B][COLOR gold]Rechercher[/COLOR][/B]', 'fmov', 'fmov_search', ICON, FANART, True,
            infoLabels={'title': u'Rechercher', 'plot': u'Rechercher dans les trois listes (équipe, championnat…).'})
+    xbmcplugin.endOfDirectory(_handle)
+
+
+def iptv_menu():
+    for s in site_iptv.SUBSITES:
+        addDir(u'[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(s.NAME), s.KEY,
+               'site_events', ICON, FANART, True,
+               infoLabels={'title': s.NAME, 'plot': s.DESC})
     xbmcplugin.endOfDirectory(_handle)
 
 
@@ -1057,7 +1073,8 @@ def site_streams_menu(payload):
     d = json.loads(payload)
     poster = d.get('p') or ICON
     title = d.get('t', '')
-    fr_only = _french_only()
+    site = SITES.get(d['k'])
+    fr_only = _french_only() and not getattr(site, 'NO_FR_FILTER', False)
     shown = 0
     for sname, surl in d['s']:
         # server names carry accents too (e.g. "Señal 1") -- byte-str .format()
@@ -1167,6 +1184,8 @@ def router(paramstring):
             xbmc.executebuiltin('UpdateAddonRepos')
         elif params['mode'] == 'fmov_menu':
             fmov_menu()
+        elif params['mode'] == 'iptv_menu':
+            iptv_menu()
         elif params['mode'] == 'fmov_search':
             fmov_search()
         elif params['mode'] == 'site_events':

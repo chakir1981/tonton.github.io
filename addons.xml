@@ -41,7 +41,7 @@
         <platform>all</platform>
     </extension>
 </addon>
-	<addon id="plugin.video.sporthdme" name="SportHD" version="2.0.4" provider-name="chakir1981">
+	<addon id="plugin.video.sporthdme" name="SportHD" version="2.0.5" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -58,8 +58,9 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
-      [B]v2.0.4[/B] 01/11/2026
-- Interface entièrement traduite en français : « Événements en direct », « Football Libre », « Football Libre MOV », sous-menus « Chaînes latino », « Sports USA », « Football en direct », descriptions et repli « Serveur ».
+      [B]v2.0.5[/B] 01/11/2026
+- Nouvelle rubrique « Chaînes en direct (IPTV) » : des centaines de chaînes TV en direct du monde entier — « Sport en français », « Chaînes en français (tous pays) » (France, Belgique, Suisse, Canada, Maghreb, Afrique…) et « Sport du monde entier ». Logos, tri par pays, sources publiques du projet iptv-org mises à jour en continu.
+- v2.0.4 : interface entièrement traduite en français : « Événements en direct », « Football Libre », « Football Libre MOV », sous-menus « Chaînes latino », « Sports USA », « Football en direct », descriptions et repli « Serveur ».
 - v2.0.3 : l'add-on est publié au nom de chakir1981.
 - v2.0.2 : correction du cache d'images de Kodi — les fichiers d'images sont renommés (icon2.png / fanart2.jpg) pour que le nouveau logo et le nouveau fanart s'affichent partout.
 - v2.0.1 : retour au menu classique (Événements en direct + sites annexes) ; réglage « Uniquement les sources françaises » dans les paramètres (activé par défaut) ; serveurs affichés « un », « deux », « trois ».

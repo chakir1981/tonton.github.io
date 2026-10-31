@@ -22,4 +22,4 @@ Kodi propose automatiquement les mises à jour de SportHD ensuite.
 
 [**Code source de SportHD**](https://github.com/chakir1981/tonton.github.io/tree/master/plugin.video.sporthdme)
 
-Agenda sportif en direct : **Événements en direct**, **Football Libre**, **Football Libre MOV** (sous-menus : Chaînes latino, Sports USA, Football en direct, Recherche). Un réglage « Uniquement les sources françaises » est disponible dans les paramètres de l'add-on.
+Agenda sportif en direct : **Événements en direct**, **Football Libre**, **Football Libre MOV** (sous-menus : Chaînes latino, Sports USA, Football en direct, Recherche) et **Chaînes en direct (IPTV)** (Sport en français, Chaînes en français de tous les pays, Sport du monde entier — sources publiques [iptv-org](https://github.com/iptv-org/iptv)). Un réglage « Uniquement les sources françaises » est disponible dans les paramètres de l'add-on.
