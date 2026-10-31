@@ -43,6 +43,8 @@ LEAGUE_MENU = [
     (u'Italie', u'Serie A, Serie B', r'Italy '),
     (u'Allemagne', u'Bundesliga, 2. Bundesliga, 3. Liga', r'Germany (?!DEL)'),
     (u'Portugal', u'Primeira Liga', r'Portugal '),
+    (u"Coupes d'Europe", u"Ligue des Champions, Europa League, Conference League",
+     r'(?i)europe |champions league|europa league|conference league|uefa '),
 ]
 LEAGUES = dict((name, (desc, re.compile(rx))) for name, desc, rx in LEAGUE_MENU)
 
