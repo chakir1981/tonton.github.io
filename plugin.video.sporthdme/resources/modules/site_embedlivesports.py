@@ -21,17 +21,13 @@ from datetime import datetime, timedelta
 from dateutil.parser import parse as _dtparse
 from dateutil.tz import gettz
 
-NAME = 'Eventos En Vivo'
+NAME = u'Événements en direct'
 KEY = 'emls'
-DESC = ('[B]Eventos En Vivo[/B]\n\n'
-        'Agenda de deportes en directo: fútbol y más, ordenados por hora, '
-        'con varios servidores por partido (Manual y Automática). '
-        'Los eventos finalizados se ocultan automáticamente. '
-        'La narración de los partidos está en español latinoamericano.\n\n'
-        '[I]Live sports agenda: football and more, sorted by time, with '
-        'several servers per match (Manual and Auto). Finished events are '
-        'hidden automatically. Match commentary is in Latin American '
-        'Spanish.[/I]')
+DESC = (u'[B]Événements en direct[/B]\n\n'
+        u'Agenda sportif en direct : football et bien plus, classé par heure, '
+        u'avec plusieurs serveurs par match (manuel et automatique). '
+        u'Les événements terminés sont masqués automatiquement. '
+        u'Les commentaires des matchs sont en espagnol latino-américain.')
 VERI_URL = 'https://streamveri.xyz/'
 FALLBACK_DOMAIN = 'https://streamx-hd.com'
 UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
@@ -97,7 +93,7 @@ def parse_events(eventos):
                     u = s.get('url') or ''
                     if 'live1.php' not in u:
                         continue
-                    nm = s.get('name') or 'Server'
+                    nm = s.get('name') or u'Serveur'
                     servers.append([nm, u])
                     servers.append([nm + u' · Auto', u.replace('live1.php', 'live2.php')])
                 if not servers:

@@ -25,7 +25,7 @@ from dateutil import parser, tz
 # Extra sports sites: one self-contained module each. To add a site, drop a
 # module exposing NAME/KEY/list_events()/resolve() and append it here.
 # tvsport.guide is no longer a menu entry: it is the fallback schedule for
-# LIVE EVENTS and Eventos En Vivo (see Live_fallback_url).
+# ÉVÉNEMENTS EN DIRECT and Événements en direct (see Live_fallback_url).
 EXTRA_SITES = [site_embedlivesports, site_futbollibre]
 SITES = {s.KEY: s for s in EXTRA_SITES}
 # futbol-libre.mov: one main-menu entry -> its three lists (fmov_menu)

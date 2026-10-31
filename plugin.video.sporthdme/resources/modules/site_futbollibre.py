@@ -21,17 +21,17 @@ from dateutil.tz import gettz
 
 from resources.modules import econfig as _econfig
 
-NAME = 'Futbol Libre'
+NAME = u'Football Libre'
 KEY = 'fllibre'
-DESC = ('[B]Futbol Libre[/B]\n\n'
-        'Agenda de futbol en directo (futbollibretv.space), ordenada por hora, con '
-        'varios canales por evento. Los eventos finalizados se ocultan.\n\n'
-        '[I]Live football agenda, sorted by time, several channels per event. '
-        'Finished events are hidden. Commentary in Latin American Spanish.[/I]')
+DESC = (u'[B]Football Libre[/B]\n\n'
+        u'Agenda de football en direct (futbollibretv.space), classée par heure, '
+        u'avec plusieurs canaux par événement. Les événements terminés sont '
+        u'masqués. Les commentaires des matchs sont en espagnol '
+        u'latino-américain.')
 BASE = 'https://futbollibretv.space'
 AGENDA = BASE + '/api/agenda'
-# futbollibrefullhd.org agenda (same embed family); used as the Eventos En
-# Vivo fallback by default.py, not as its own menu entry.
+# futbollibrefullhd.org agenda (same embed family); used as the Événements
+# en direct fallback by default.py, not as its own menu entry.
 DIARIES = 'https://api.wqxag.com/diaries.json'
 DIARIES_REFERER = 'https://futbollibrefullhd.org/'
 TZ = 'America/Lima'

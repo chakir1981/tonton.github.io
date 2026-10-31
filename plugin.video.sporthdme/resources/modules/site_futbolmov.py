@@ -180,7 +180,7 @@ def parse_list(payload, now_ms=None):
             if _usable(url):
                 host = re.sub(r'^www\.', '', url.split('/')[2]).split('.')[0]
                 servers.append([u'%s (%s)' % (s.get('name') or s.get('language') or
-                                              'Server %d' % (len(servers) + 1), host), url])
+                                              u'Serveur %d' % (len(servers) + 1), host), url])
         start_ms = int(m.get('timestamp') or 0)
         status = _status(start_ms, m.get('live'), now_ms)
         if not (title and servers) or status == 'done':
@@ -208,7 +208,7 @@ def soccer_servers(match, kt=None):
     kt = kt or int(time.time())
     out = []
     for c in match.get('channels') or []:
-        name = c.get('server_name') or 'Server %d' % (len(out) + 1)
+        name = c.get('server_name') or u'Serveur %d' % (len(out) + 1)
         if c.get('type') == 'HLS' and c.get('link'):
             out.append([name, c['link']])
         elif c.get('ch') and str(c.get('edge')) != '0':
@@ -327,22 +327,24 @@ def _list_soccer():
     return out
 
 
-NAME = 'Futbol Libre MOV'
-DESC = ('[B]Futbol Libre MOV[/B]\n\n'
-        'Menú triple + búsqueda (futbol-libre.mov):\n'
-        '- Latino: partidos con canales latinos (ESPN, Fox, TNT, Win...)\n'
-        '- USA: deportes de EE. UU. (NFL, NBA, NHL, MLB, UFC...)\n'
-        '- Football Live: fútbol en directo (comentario en árabe)\n'
-        '- Search: busca por equipo o liga en los tres menús\n\n'
-        '[I]Triple menu + search: Latino (Latin American channels), USA '
-        '(US sports), Football Live (Arabic commentary) and a Search that '
-        'looks up a team or league across all three lists.[/I]')
+NAME = u'Football Libre MOV'
+DESC = (u'[B]Football Libre MOV[/B]\n\n'
+        u'Trois listes + recherche (futbol-libre.mov) :\n'
+        u'- Chaînes latino : matchs avec chaînes latines (ESPN, Fox, TNT, Win…)\n'
+        u'- Sports USA : sports américains (NFL, NBA, NHL, MLB, UFC…)\n'
+        u'- Football en direct : football live (commentaire en arabe)\n'
+        u'- Recherche : chercher une équipe ou un championnat dans les trois listes\n\n'
+        u'[I]Les commentaires sont en espagnol ou en arabe selon la chaîne '
+        u'choisie.[/I]')
 SUBSITES = [
-    _Sub('fmov_latin', 'Latino', 'Partidos con canales latinos (ESPN, Fox, TUDN...).',
+    _Sub('fmov_latin', u'Chaînes latino',
+         u'Matchs avec chaînes latines (ESPN, Fox, TUDN…).',
          lambda: _list('latin/matches')),
-    _Sub('fmov_us', 'USA', 'US sports: NFL, NBA, NHL, MLB, UFC...',
+    _Sub('fmov_us', u'Sports USA',
+         u'Sports américains : NFL, NBA, NHL, MLB, UFC…',
          lambda: _list('gsc/matches')),
-    _Sub('fmov_soccer', 'Football Live', 'Live football, Arabic commentary (kora).',
+    _Sub('fmov_soccer', u'Football en direct',
+         u'Football en direct, commentaire en arabe (kora).',
          _list_soccer),
 ]
 
