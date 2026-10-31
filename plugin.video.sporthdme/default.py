@@ -964,7 +964,7 @@ def addDir(name, url, mode, iconimage, description, isFolder=True, infoLabels=No
     if infoLabels:
         liz.setInfo(type="Video", infoLabels=infoLabels)
     if not isFolder:
-        if mode == 'settings' or mode == 'version' or mode == 'clear' or mode == 'play_stream' or mode == 'site_play':
+        if mode == 'settings' or mode == 'version' or mode == 'clear' or mode == 'play_stream' or mode == 'site_play' or mode == 'vavoo_diag':
             isFolder = False
         else:
             liz.setProperty('IsPlayable', 'true')
@@ -986,7 +986,12 @@ def site_events_menu(key):
         except Exception as e:
             log_info('emls fallback failed: {0!r}'.format(e))
         key = site_futbollibre.KEY
-    fr_only = _french_only()
+    # Vavoo subsites set NO_FR_FILTER: every channel is French by
+    # definition and their server names are generic "Serveur N", so the
+    # "Uniquement les sources françaises" setting must not hide them
+    # (it wiped the whole Vavoo lists with the misleading message
+    # "Aucune source française parmi les matchs de ce site").
+    fr_only = _french_only() and not getattr(site, 'NO_FR_FILTER', False)
     shown = 0
     for e in events:
         if fr_only and e.get('servers') and not _servers_have_french(e.get('servers')):
@@ -1000,6 +1005,9 @@ def site_events_menu(key):
             u'[COLOR red]Vavoo est momentanément inaccessible '
             u'(connexion ou serveur). Réessayez plus tard.[/COLOR]',
             NAME, ICON, 6000)
+        addDir(u'[B][COLOR gold]Diagnostic Vavoo — voir pourquoi la liste '
+               u'est vide[/COLOR][/B]', 'diag', 'vavoo_diag', ICON, FANART,
+               False, infoLabels={'title': u'Diagnostic Vavoo'})
     xbmcplugin.setContent(_handle, 'movies')
     xbmcplugin.endOfDirectory(_handle)
 
@@ -1042,7 +1050,52 @@ def vavoo_menu():
         addDir(u'[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(s.NAME), s.KEY,
                'site_events', ICON, FANART, True,
                infoLabels={'title': s.NAME, 'plot': s.DESC})
+    addDir(u'[B][COLOR gold]Diagnostic Vavoo (dépannage)[/COLOR][/B]', 'diag',
+           'vavoo_diag', ICON, FANART, False,
+           infoLabels={'title': u'Diagnostic Vavoo',
+                       'plot': u'Teste la connexion à Vavoo (catalogue, '
+                               u'signature, cache, lecture) et affiche la '
+                               u'cause exacte des listes vides.'})
     xbmcplugin.endOfDirectory(_handle)
+
+
+def vavoo_diag():
+    rows = []
+    try:
+        rows = site_vavoo.diagnostic()
+    except Exception as e:
+        log_info('vavoo diagnostic failed: {0!r}'.format(e))
+    lines = [u'[B]Diagnostic Vavoo — SportHD {0}[/B]'.format(VERSION), u'']
+    for label, ok, detail in rows:
+        state = (u'[COLOR lime]OK    [/COLOR]' if ok
+                 else u'[COLOR red]ECHEC[/COLOR]')
+        lines.append(u'{0}  {1} : {2}'.format(state, label, detail))
+    if not rows:
+        lines.append(u'[COLOR red]ECHEC[/COLOR]  diagnostic impossible')
+    lines.append(u'')
+    if site_vavoo.LAST_ERROR:
+        lines.append(u'Dernière erreur enregistrée :')
+        lines.append(u'[COLOR gold]{0}[/COLOR]'.format(site_vavoo.LAST_ERROR))
+        lines.append(u'')
+    if rows and not rows[0][1]:
+        lines.append(u'Le catalogue Vavoo est inaccessible depuis votre '
+                     u'connexion (blocage du fournisseur d\'accès, DNS ou '
+                     u'pare-feu). Essayez un autre réseau (partage de '
+                     u'connexion mobile) pour comparer.')
+    try:
+        xbmcgui.Dialog().textviewer(u'Diagnostic Vavoo', u'\n'.join(lines))
+    except Exception:
+        control.okDialog(u'Diagnostic Vavoo', u'\n'.join(lines))
+    try:
+        if xbmcgui.Dialog().select(
+                u'Diagnostic Vavoo — actions',
+                [u'Vider le cache Vavoo et réessayer', u'Fermer']) == 0:
+            site_vavoo.clear_cache()
+            control.infoDialog(
+                u'[COLOR gold]Cache Vavoo vidé — rouvrez les listes '
+                u'Vavoo.[/COLOR]', NAME, ICON, 5000)
+    except Exception:
+        pass
 
 
 def fmov_search():
@@ -1076,7 +1129,10 @@ def site_streams_menu(payload):
     d = json.loads(payload)
     poster = d.get('p') or ICON
     title = d.get('t', '')
-    fr_only = _french_only()
+    # same NO_FR_FILTER exception as site_events_menu (Vavoo servers are
+    # generic "Serveur N" and French by definition)
+    fr_only = _french_only() and not getattr(
+        SITES.get(d['k']), 'NO_FR_FILTER', False)
     shown = 0
     for sname, surl in d['s']:
         # server names carry accents too (e.g. "Señal 1") -- byte-str .format()
@@ -1188,6 +1244,8 @@ def router(paramstring):
             fmov_menu()
         elif params['mode'] == 'vavoo_menu':
             vavoo_menu()
+        elif params['mode'] == 'vavoo_diag':
+            vavoo_diag()
         elif params['mode'] == 'fmov_search':
             fmov_search()
         elif params['mode'] == 'site_events':

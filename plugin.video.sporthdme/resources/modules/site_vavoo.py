@@ -63,6 +63,8 @@ UA = 'MediaHubMX/2'  # required by catalog, resolve AND playback
 URL_PING = 'https://www.vypn.net/api/app/ping'
 URL_CATALOG = 'https://vavoo.to/mediahubmx-catalog.json'
 URL_RESOLVE = 'https://vavoo.to/mediahubmx-resolve.json'
+
+LAST_ERROR = u''   # dernière cause d'échec (listes/lecture), pour le diagnostic
 UA_BROWSER = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
               'AppleWebKit/537.36 (KHTML, like Gecko) '
               'Chrome/124.0.0.0 Safari/537.36')
@@ -253,7 +255,7 @@ def _get_signature(force=False):
     try:
         data = _post_json(
             URL_PING, _build_payload(),
-            {'accept': '*/*', 'user-agent': UA_BROWSER}, timeout=15)
+            {'accept': '*/*', 'user-agent': UA_BROWSER}, timeout=15, retries=0)
         sig = (data.get('sig') or data.get('addonSig')
                or data.get('signature') or '')
         if sig:
@@ -289,31 +291,53 @@ def _catalog(sig, group):
     return items
 
 
+def _errstr(exc):
+    """Compact one-line description of an exception (ASCII-safe)."""
+    try:
+        s = '{0}'.format(exc)
+    except Exception:
+        s = ''
+    s = (s or exc.__class__.__name__).strip()
+    s = s.splitlines()[0] if s else exc.__class__.__name__
+    return s[:140]
+
+
 def _cached_channels(group):
     """Channels of one group, cached VAVOO_CACHE_H hours (offline fallback).
 
     Anonymous catalogue request first (vavoo.to answers without the
     mediahubmx-signature); the signed request is only tried when the
     anonymous one failed AND a signature is obtainable, so an
-    unreachable vypn.net can no longer empty the lists.
+    unreachable vypn.net can no longer empty the lists. The reason of a
+    total failure is kept in LAST_ERROR for the on-screen diagnostic.
     """
+    global LAST_ERROR
     cache = _cache_load()
     key = 'channels_' + group
     entry = cache.get(key) or {}
     if time.time() - entry.get('t', 0) < VAVOO_CACHE_H * 3600 \
             and entry.get('items'):
+        LAST_ERROR = u''
         return entry['items']
-    items = []
+    items, errs = [], []
     for attempt in range(2):
         sig = '' if attempt == 0 else _get_signature()
         try:
             items = _catalog(sig, group)
-        except Exception:
+        except Exception as exc:
             items = []
+            errs.append(u'catalogue {0} : {1}'.format(
+                u'anonyme' if attempt == 0 else u'signé', _errstr(exc)))
         if items:
             break
     if not items:
-        return entry.get('items') or []
+        if entry.get('items'):
+            LAST_ERROR = u''
+            return entry['items']   # cache périmé vaut mieux que liste vide
+        LAST_ERROR = u' ; '.join(errs) or \
+            u'catalogue vide (vavoo.to ne renvoie aucune chaîne)'
+        return []
+    LAST_ERROR = u''
     cache[key] = {'t': int(time.time()), 'items': items}
     _cache_save(cache)
     return items
@@ -344,6 +368,8 @@ def _resolve(server_url):
     """
     data = {'language': 'de', 'region': 'AT', 'url': server_url,
             'clientVersion': '3.1.0'}
+    global LAST_ERROR
+    errs = []
     for attempt in range(2):
         sig = '' if attempt == 0 else _get_signature(force=True)
         headers = {'user-agent': UA,
@@ -355,9 +381,74 @@ def _resolve(server_url):
             j = _post_json(URL_RESOLVE, data, headers, timeout=15, retries=1)
             if isinstance(j, list) and j and j[0].get('url'):
                 return j[0]['url']
-        except Exception:
+        except Exception as exc:
+            errs.append(_errstr(exc))
             continue
+    LAST_ERROR = (u'lecture : ' + u' ; '.join(errs)
+                  if errs else u'lecture : aucun flux renvoyé')
     return None
+
+
+def clear_cache():
+    """Delete the Vavoo cache file (diagnostic action)."""
+    global LAST_ERROR
+    LAST_ERROR = u''
+    try:
+        os.remove(_cache_path())
+        return True
+    except Exception:
+        return False
+
+
+def diagnostic():
+    """[(label, ok, detail)] for the on-screen Vavoo troubleshooter."""
+    out = []
+    # 1) catalogue anonyme
+    try:
+        items = _catalog('', GROUP_SPORT)
+        out.append((u'Catalogue Vavoo (sans signature)', bool(items),
+                    u'{0} chaînes « {1} »'.format(len(items), GROUP_SPORT)
+                    if items else u'vavoo.to répond mais aucune chaîne'))
+    except Exception as exc:
+        out.append((u'Catalogue Vavoo (sans signature)', False,
+                    _errstr(exc)))
+    # 2) signature vypn.net (secours uniquement depuis la 2.0.8)
+    try:
+        sig = _get_signature(force=True)
+        out.append((u'Signature vypn.net (secours)', bool(sig),
+                    u'reçue ({0} caractères)'.format(len(sig)) if sig
+                    else u'injoignable — sans incidence depuis la 2.0.8'))
+    except Exception as exc:
+        out.append((u'Signature vypn.net (secours)', False, _errstr(exc)))
+    # 3) cache local
+    try:
+        cache = _cache_load()
+        chans = [(k, v) for k, v in cache.items()
+                 if k.startswith('channels_') and v.get('items')]
+        if chans:
+            age_min = min(int(time.time() - v.get('t', 0)) // 60
+                          for _, v in chans)
+            total = sum(len(v['items']) for _, v in chans)
+            out.append((u'Cache local', True,
+                        u'{0} groupe(s), {1} chaînes, plus récent : {2} min'
+                        .format(len(chans), total, age_min)))
+        else:
+            out.append((u'Cache local', False,
+                        u'vide (normal au premier essai)'))
+    except Exception as exc:
+        out.append((u'Cache local', False, _errstr(exc)))
+    # 4) lecture test (resolve) sur la première chaîne du catalogue
+    try:
+        items = _catalog('', GROUP_SPORT)
+        url = items[0].get('url') if items else ''
+        name = clean_name(items[0].get('name')) if items else u'?'
+        m3u8 = _resolve(url) if url else None
+        out.append((u'Lecture test (resolve)', bool(m3u8),
+                    u'{0} : flux obtenu'.format(name) if m3u8
+                    else u'aucun flux renvoyé pour {0}'.format(name)))
+    except Exception as exc:
+        out.append((u'Lecture test (resolve)', False, _errstr(exc)))
+    return out
 
 
 class _Sub(object):

@@ -41,7 +41,7 @@
         <platform>all</platform>
     </extension>
 </addon>
-	<addon id="plugin.video.sporthdme" name="SportHD" version="2.0.8" provider-name="chakir1981">
+	<addon id="plugin.video.sporthdme" name="SportHD" version="2.0.9" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -58,9 +58,11 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
-      [B]v2.0.8[/B] 01/11/2026
-- Correctif Vavoo : les listes « Sport France » et « Chaînes France » pouvaient rester vides lorsque le serveur de signatures (vypn.net) est injoignable depuis certains fournisseurs d'accès. Le catalogue Vavoo est désormais interrogé d'abord sans signature (beaucoup plus robuste) ; la signature signée ne sert plus que de secours, au catalogue comme à la lecture des flux.
-- Nouveau message à l'écran si Vavoo est momentanément inaccessible, au lieu d'une liste silencieusement vide.
+      [B]v2.0.9[/B] 01/11/2026
+- Correctif principal : les chaînes Vavoo étaient masquées par le réglage « Uniquement les sources françaises » (activé par défaut) car leurs serveurs s'appellent « Serveur 1, Serveur 2… » — le message « Aucune source française parmi les matchs de ce site » s'affichait alors que les chaînes étaient bien chargées. Les rubriques Vavoo ne sont plus soumises à ce filtre (tout y est français par définition), aussi bien pour les listes que pour le choix des serveurs.
+- Nouveau : « Diagnostic Vavoo (dépannage) » dans la rubrique Vavoo — teste en direct le catalogue, la signature de secours, le cache local et la lecture d'un flux, affiche la version de l'add-on et la cause exacte des listes vides, et permet de vider le cache Vavoo.
+- Si les listes restent vides, un raccourci « Diagnostic Vavoo » apparaît directement dans la liste vide.
+- v2.0.8 : correctif Vavoo — le catalogue est interrogé d'abord sans signature (le serveur de signatures vypn.net, parfois bloqué par les fournisseurs d'accès, n'est plus indispensable) ; message à l'écran si Vavoo est inaccessible.
 - v2.0.7 : retrait de la rubrique « Chaînes en direct (IPTV) » (listes iptv-org) ; « Chaînes Vavoo (France) » conservée.
 - v2.0.6 : nouvelle rubrique « Chaînes Vavoo (France) » : les bouquets français de la plateforme Vavoo. Les variantes d'une même chaîne sont proposées comme plusieurs serveurs. Flux authentifiés automatiquement à chaque lancement.
 - v2.0.5 : nouvelle rubrique « Chaînes en direct (IPTV) » (retirée en 2.0.7).
