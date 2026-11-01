@@ -15,7 +15,7 @@ Résolution (même famille que les miroirs vertex/nexa/kora) :
 Les domaines de cet écosystème tournent régulièrement : la liste est
 modifiable dans les réglages (Chaînes FR 24/7 : domaines Daddylive).
 Ce module est volontairement sans dépendance Kodi afin de rester
-testable hors de Kodi (mêmes principes que epg.py).
+testable hors de Kodi.
 """
 
 import json

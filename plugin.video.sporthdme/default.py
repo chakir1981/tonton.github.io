@@ -14,13 +14,6 @@ import xbmcgui
 import xbmcplugin
 import requests
 from resources.modules import control, client
-from resources.modules import site_embedlivesports
-from resources.modules import site_futbollibre
-from resources.modules import site_futbolmov
-try:
-    from resources.modules import epg as epg_mod
-except ImportError:
-    epg_mod = None
 try:
     from resources.modules import dlch as dlch_mod
 except ImportError:
@@ -30,14 +23,8 @@ from dateutil.parser import parse
 from dateutil.tz import gettz
 from dateutil import parser, tz
 
-# Extra sports sites: one self-contained module each. To add a site, drop a
-# module exposing NAME/KEY/list_events()/resolve() and append it here.
 # tvsport.guide is no longer a menu entry: it is the fallback schedule for
-# ÉVÉNEMENTS EN DIRECT and Événements en direct (see Live_fallback_url).
-EXTRA_SITES = [site_embedlivesports, site_futbollibre]
-SITES = {s.KEY: s for s in EXTRA_SITES}
-# futbol-libre.mov: one main-menu entry -> its three lists (fmov_menu)
-SITES.update((s.KEY, s) for s in site_futbolmov.SUBSITES)
+# ÉVÉNEMENTS EN DIRECT (see Live_fallback_url).
 
 _url = sys.argv[0]
 _handle = int(sys.argv[1])
@@ -99,19 +86,6 @@ def log_error(msg):
 def Main_menu():
     # addDir('[B][COLOR gold]Channels 24/7[/COLOR][/B]', 'https://1.livesoccer.sx/program.php', 14, ICON, FANART, '')
     addDir(u'[B][COLOR white]ÉVÉNEMENTS EN DIRECT[/COLOR][/B]', Live_url, 'events', ICON, FANART, True)
-    for _s in EXTRA_SITES:
-        addDir('[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(_s.NAME),
-               _s.KEY, 'site_events', ICON, FANART, True,
-               infoLabels={'title': _s.NAME, 'plot': getattr(_s, 'DESC', '')})
-    addDir('[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(site_futbolmov.NAME),
-           'fmov', 'fmov_menu', ICON, FANART, True,
-           infoLabels={'title': site_futbolmov.NAME, 'plot': site_futbolmov.DESC})
-    if epg_mod is not None:
-        addDir(u'[B][COLOR gold]GRILLE TV SPORT (FR)[/COLOR][/B]', 'epg', 'epg', ICON, FANART, True,
-               infoLabels={'title': u'Grille TV Sport (France)',
-                           'plot': u'Programmes en cours et à venir sur les chaînes sport françaises '
-                                   u'(beIN, Canal+, RMC Sport, Ligue 1+, DAZN, Eurosport, TNT). '
-                                   u'Source : XMLTV FR (xmltvfr.fr), grille quotidienne sur ~9 jours.'})
     # addDir('[B][COLOR gold]Alternative VIEW [/COLOR][/B]', '', '', ICON, FANART, '')
     # addDir('[B][COLOR gold]Alternative LIVE EVENTS[/COLOR][/B]', Alt_url, 15, ICON, FANART, '')
     # addDir('[B][COLOR white]SPORTS[/COLOR][/B]', '', 3, ICON, FANART, '')
@@ -303,21 +277,6 @@ def _channels_have_french(channels):
                 if _is_french_source(row.get('channelName'), row.get('language')):
                     return True
     return not identified
-
-
-def _servers_have_french(servers):
-    """True si au moins un serveur (sites annexes) est en français."""
-    for srv in servers or []:
-        if isinstance(srv, dict):
-            if _is_french_source(srv.get('name'), srv.get('language')):
-                return True
-        elif isinstance(srv, (list, tuple)) and srv:
-            if _is_french_source(srv[0], ''):
-                return True
-        elif isinstance(srv, six.string_types):
-            if _is_french_source(srv, ''):
-                return True
-    return False
 
 
 # Les trois miroirs du service principal sont affichés discrètement
@@ -1008,275 +967,11 @@ def addDir(name, url, mode, iconimage, description, isFolder=True, infoLabels=No
     if infoLabels:
         liz.setInfo(type="Video", infoLabels=infoLabels)
     if not isFolder:
-        if mode == 'settings' or mode == 'version' or mode == 'clear' or mode == 'play_stream' or mode == 'site_play' \
-                or mode == 'epg_info' or mode == 'epg_none' or mode == 'epg_refresh':
+        if mode == 'settings' or mode == 'version' or mode == 'clear' or mode == 'play_stream':
             isFolder = False
         else:
             liz.setProperty('IsPlayable', 'true')
     xbmcplugin.addDirectoryItem(_handle, url=u, listitem=liz, isFolder=isFolder)
-
-
-def site_events_menu(key):
-    site = SITES[key]
-    try:
-        events = site.list_events()
-    except Exception as e:
-        log_info('site {0} failed: {1!r}'.format(key, e))
-        events = []
-    if not events and key == site_embedlivesports.KEY:
-        # streamx-hd down / empty agenda: futbollibrefullhd.org agenda instead,
-        # resolved by the Futbol Libre module (same embed family)
-        try:
-            events = site_futbollibre.list_diaries()
-        except Exception as e:
-            log_info('emls fallback failed: {0!r}'.format(e))
-        key = site_futbollibre.KEY
-    fr_only = _french_only()
-    shown = 0
-    for e in events:
-        if fr_only and e.get('servers') and not _servers_have_french(e.get('servers')):
-            continue
-        _add_site_event(key, site, e)
-        shown += 1
-    if events and not shown:
-        control.infoDialog(u"[COLOR gold]Aucune source française parmi les matchs de ce site.[/COLOR]", NAME, ICON, 6000)
-    xbmcplugin.setContent(_handle, 'movies')
-    xbmcplugin.endOfDirectory(_handle)
-
-
-def _add_site_event(key, site, e):
-    # title colour signals state: cyan = live, gold = upcoming, grey = finished.
-    colors = {'live': 'cyan', 'soon': 'gold', 'done': 'grey'}
-    t = time_convert(e['start_ms']) if e['start_ms'] else u'-'
-    # event titles carry accents/ñ (España, Brasil...) -> keep every piece
-    # unicode so the byte-str .format() can't fall back to the ascii codec.
-    tag = six.ensure_text(e.get('code') or e.get('league') or '',
-                          encoding='utf-8', errors='replace')  # country code, else league
-    title = six.ensure_text(e['title'], encoding='utf-8', errors='replace')
-    cc = u'[COLOR orange][{0}][/COLOR] '.format(tag) if tag else u''
-    if getattr(site, 'TAG_LAST', False):  # time + title first, league/sport tag at the end
-        label = u'[COLOR cyan]{0}[/COLOR] [COLOR {1}][B]{2}[/B][/COLOR]{3}'.format(
-            t, colors.get(e['status'], 'gold'), title, u' ' + cc.rstrip() if cc else u'')
-    else:
-        label = u'{0}[COLOR cyan]{1}[/COLOR] [COLOR {2}][B]{3}[/B][/COLOR]'.format(
-            cc, t, colors.get(e['status'], 'gold'), title)
-    # carry the event's title + poster down the chain so the servers menu
-    # and the player show the match, not the generic SportHD art.
-    payload = json.dumps({'k': key, 's': e['servers'],
-                          't': e['title'], 'p': e['poster']})
-    addDir(label, payload, 'site_streams', e['poster'] or ICON, e['title'], True)
-
-
-def fmov_menu():
-    for s in site_futbolmov.SUBSITES:
-        addDir(u'[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(s.NAME), s.KEY,
-               'site_events', ICON, FANART, True,
-               infoLabels={'title': s.NAME, 'plot': s.DESC})
-    addDir(u'[B][COLOR gold]Rechercher[/COLOR][/B]', 'fmov', 'fmov_search', ICON, FANART, True,
-           infoLabels={'title': u'Rechercher', 'plot': u'Rechercher dans les trois listes (équipe, championnat…).'})
-    xbmcplugin.endOfDirectory(_handle)
-
-
-def fmov_search():
-    kb = xbmc.Keyboard('', u'Rechercher')
-    kb.doModal()
-    query = six.ensure_text(kb.getText(), encoding='utf-8', errors='replace').strip().lower() \
-        if kb.isConfirmed() else u''
-    if not query:
-        xbmcplugin.endOfDirectory(_handle, succeeded=False)
-        return
-    found = 0
-    for site in site_futbolmov.SUBSITES:
-        try:
-            events = site.list_events()
-        except Exception as e:
-            log_info('fmov search {0} failed: {1!r}'.format(site.KEY, e))
-            continue
-        for e in events:
-            hay = six.ensure_text(u'{0} {1}'.format(e['title'], e.get('league') or ''),
-                                  encoding='utf-8', errors='replace').lower()
-            if query in hay:
-                _add_site_event(site.KEY, site, e)
-                found += 1
-    if not found:
-        control.infoDialog(u'[COLOR red]Aucun résultat[/COLOR]', NAME, ICON, 4000)
-    xbmcplugin.setContent(_handle, 'movies')
-    xbmcplugin.endOfDirectory(_handle)
-
-
-def site_streams_menu(payload):
-    d = json.loads(payload)
-    poster = d.get('p') or ICON
-    title = d.get('t', '')
-    fr_only = _french_only()
-    shown = 0
-    for sname, surl in d['s']:
-        # server names carry accents too (e.g. "Señal 1") -- byte-str .format()
-        # on a unicode arg raises UnicodeEncodeError in py2, so keep it unicode.
-        sname = six.ensure_text(sname, encoding='utf-8', errors='replace')
-        if fr_only and not _is_french_source(sname, ''):
-            continue
-        info = {'title': u'{0} | {1}'.format(title, sname), 'plot': title}
-        addDir(u'[B]{0}[/B]'.format(sname),
-               json.dumps({'k': d['k'], 'u': surl, 't': title, 'p': d.get('p', '')}),
-               'site_play', poster, title, isFolder=False, infoLabels=info)
-        shown += 1
-    if not shown:
-        control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]", NAME, ICON, 6000)
-    xbmcplugin.setContent(_handle, 'videos')
-    xbmcplugin.endOfDirectory(_handle)
-
-
-def site_play(payload):
-    d = json.loads(payload)
-    site = SITES[d['k']]
-    title = d.get('t') or NAME
-    poster = d.get('p') or ICON
-    Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
-    result = site.resolve(d['u'])
-    if not result:
-        raise Exception('could not resolve stream for ' + d['u'])
-    # resolve() normally returns just the m3u8 string; sites that chain
-    # through intermediate hosts (e.g. futbollibre's tarjetarojita.xyz
-    # wrapper) return (m3u8, final_page_url) since the CDN token's own
-    # host, not the originally-clicked link, is what the player needs
-    # for Referer/Origin.
-    flink, referer_url = result if isinstance(result, tuple) else (result, d['u'])
-    origin = '{uri.scheme}://{uri.netloc}'.format(uri=urlparse(referer_url))
-    stream_headers = {'Referer': origin + '/', 'Origin': origin, 'User-Agent': site.UA}
-    # installed inputstream.ffmpegdirect (21.3.8) does not whitelist a
-    # stream_headers listitem property -- its addon.xml listitemprops=
-    # "...default_url|is_realtime_stream|..." has no headers entry, so
-    # Kodi silently drops that property before the addon ever sees it
-    # and FFmpeg opens the URL with no User-Agent, which this CDN 403s.
-    # Embed the headers in the URL itself via Kodi's "url|key=val&..."
-    # pipe convention instead -- recognized by Kodi's ffmpeg build
-    # regardless of which inputstream addon is driving it.
-    stream_url = xbmc_curl_encode(flink, stream_headers)
-    liz = xbmcgui.ListItem(six.ensure_str(title, encoding='utf-8', errors='replace'))
-    liz.setArt({'icon': poster, 'thumb': poster, 'poster': poster, 'fanart': FANART})
-    liz.setInfo('video', {'title': title, 'plot': title})
-    liz.setProperty("IsPlayable", "true")
-    liz.setContentLookup(False)
-    liz.setMimeType('application/vnd.apple.mpegurl')
-    # live m3u8 via inputstream.ffmpegdirect: the plain FFmpeg HLS demuxer
-    # leaves a read-ahead thread that isn't cancelled on CloseFile() for
-    # live (non-EOF) streams, so Kodi blocks ~28s per pending segment
-    # request before it can close/switch. ffmpegdirect tears the stream
-    # down immediately instead. It doesn't exist for Kodi 18/Leia at all
-    # (dropped from addon.xml <requires> for that reason -- a hard
-    # dependency there would make the *whole* addon uninstallable on
-    # Leia), so check for it at runtime and fall back to the plain
-    # player -- with the old close-hang -- when it's missing.
-    if xbmc.getCondVisibility('System.HasAddon(inputstream.ffmpegdirect)'):
-        liz.setProperty('inputstream', 'inputstream.ffmpegdirect')
-        liz.setProperty('inputstream.ffmpegdirect.is_realtime_stream', 'true')
-        liz.setProperty('inputstream.ffmpegdirect.stream_mode', 'live')
-        liz.setProperty('inputstream.ffmpegdirect.manifest_type', 'hls')
-        # open_mode=curl routes I/O through Kodi's own CCurlFile instead
-        # of raw FFmpeg AVFormat. Some CDNs (seen on a futbollibre
-        # alt-server chained through tarjetarojita.xyz) silently
-        # blackhole FFmpeg's bundled TLS client for ~30s while an
-        # ordinary curl/requests call against the exact same URL and
-        # headers succeeds in well under a second -- a TLS/client-
-        # fingerprint block aimed at ffmpeg, not the headers.
-        # CCurlFile's TLS stack isn't flagged the same way.
-        # ...but curl mode only sends our headers with the playlist request:
-        # FFmpeg's HLS demuxer then fetches the segments itself without
-        # Referer/Origin, so CDNs that check them on every segment (the
-        # quotarevival.net player behind tarjetarojita: 403) never start.
-        # A resolver that returns its player page means "this CDN wants
-        # these headers" -> let FFmpeg open it, it passes them to segments.
-        liz.setProperty('inputstream.ffmpegdirect.open_mode',
-                        'ffmpeg' if isinstance(result, tuple) else 'curl')
-        liz.setProperty('inputstream.ffmpegdirect.default_url', stream_url)
-    liz.setPath(stream_url)
-    xbmc.Player().play(stream_url, liz, False)
-
-
-def epg_menu():
-    if epg_mod is None:
-        control.infoDialog(u'Module EPG indisponible', NAME, ICON, 5000)
-        return
-    if epg_mod.is_stale():
-        control.infoDialog(u'[COLOR gold]Mise à jour de la grille TV…[/COLOR]', NAME, ICON, 5000)
-        if not epg_mod.refresh():
-            control.infoDialog(u'[COLOR red]Grille TV indisponible (source xmltvfr.fr injoignable)[/COLOR]',
-                               NAME, ICON, 5000)
-            return
-    for _cid, _label in epg_mod.channels():
-        _cur, _nxt = epg_mod.now_next(_cid)
-        if _cur:
-            _name = u'[COLOR lime]●[/COLOR] [B]{0}[/B] — {1} ({2})'.format(
-                _label, _cur[2], epg_mod.fmt_hour(_cur[1]))
-            if _nxt:
-                _plot = u'{0}\n\n[COLOR gold]À suivre à {1} :[/COLOR] {2}'.format(
-                    _cur[4] or _cur[2], epg_mod.fmt_hour(_nxt[0]), _nxt[2])
-            else:
-                _plot = _cur[4] or _cur[2]
-        else:
-            _name = u'[COLOR grey]○[/COLOR] [B]{0}[/B]'.format(_label)
-            _plot = u'Grille du jour disponible — aucun programme en cours.'
-        addDir(_name, _cid, 'epg_channel', ICON, FANART, True,
-               infoLabels={'title': _label, 'plot': _plot})
-    addDir(u'[B][COLOR gold]Mettre à jour la grille[/COLOR][/B]', 'force', 'epg_refresh',
-           ICON, FANART, False)
-    xbmcplugin.setContent(_handle, 'movies')
-    xbmcplugin.endOfDirectory(_handle)
-
-
-def epg_channel_menu(url):
-    if epg_mod is None:
-        return
-    _now = time.time()
-    _items = epg_mod.programs(url)
-    if not _items:
-        control.infoDialog(u'Grille indisponible pour cette chaîne', NAME, ICON, 5000)
-        return
-    _day = None
-    for _p in _items:
-        _st, _sp, _ti, _su, _de, _ic = _p
-        _d = time.strftime('%d/%m', time.localtime(_st))
-        if _d != _day:
-            _day = _d
-            addDir(u'[B][COLOR gold]— {0} —[/COLOR][/B]'.format(_d), '', 'epg_none',
-                   ICON, FANART, False)
-        _mark = u'[COLOR lime]●[/COLOR] ' if _st <= _now < _sp else u''
-        _lbl = u'{0}{1} – {2}   {3}'.format(_mark, epg_mod.fmt_hour(_st),
-                                            epg_mod.fmt_hour(_sp), _ti)
-        if _su:
-            _lbl += u' | {0}'.format(_su)
-        addDir(_lbl, '{0}&ts={1}'.format(url, _st), 'epg_info', ICON, FANART, False,
-               infoLabels={'title': _ti, 'plot': _de or _ti})
-    xbmcplugin.setContent(_handle, 'movies')
-    xbmcplugin.endOfDirectory(_handle)
-
-
-def epg_info(url, ts):
-    if epg_mod is None:
-        return
-    try:
-        _ts = int(ts)
-    except Exception:
-        return
-    for _p in epg_mod.programs(url):
-        if _p[0] == _ts:
-            _head = _p[2] + (u' | {0}'.format(_p[3]) if _p[3] else u'')
-            xbmcgui.Dialog().ok(u'Grille TV Sport', _head,
-                                _p[4] or u'(pas de description)')
-            return
-
-
-def epg_refresh():
-    if epg_mod is None:
-        return
-    control.infoDialog(u'[COLOR gold]Téléchargement de la grille TV…[/COLOR]', NAME, ICON, 5000)
-    if epg_mod.refresh(force=True):
-        control.infoDialog(u'[COLOR lime]Grille mise à jour[/COLOR]', NAME, ICON, 5000)
-        epg_menu()
-    else:
-        control.infoDialog(u'[COLOR red]Échec de la mise à jour (source injoignable)[/COLOR]',
-                           NAME, ICON, 5000)
 
 
 def router(paramstring):
@@ -1301,29 +996,6 @@ def router(paramstring):
                                ICON, 5000)
         elif params['mode'] == 'version':
             xbmc.executebuiltin('UpdateAddonRepos')
-        elif params['mode'] == 'fmov_menu':
-            fmov_menu()
-        elif params['mode'] == 'fmov_search':
-            fmov_search()
-        elif params['mode'] == 'site_events':
-            site_events_menu(params['url'])
-        elif params['mode'] == 'site_streams':
-            site_streams_menu(params['url'])
-        elif params['mode'] == 'site_play':
-            site_play(params['url'])
-        elif params['mode'] == 'epg':
-            epg_menu()
-        elif params['mode'] == 'epg_channel':
-            epg_channel_menu(params['url'])
-        elif params['mode'] == 'epg_info':
-            _u = params.get('url', '')
-            if '&ts=' in _u:
-                _ch, _ts = _u.split('&ts=', 1)
-                epg_info(_ch, _ts)
-        elif params['mode'] == 'epg_refresh':
-            epg_refresh()
-        elif params['mode'] == 'epg_none':
-            pass
     else:
         Main_menu()
 

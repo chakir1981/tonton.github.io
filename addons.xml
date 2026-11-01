@@ -41,7 +41,7 @@
         <platform>all</platform>
     </extension>
 </addon>
-	<addon id="plugin.video.sporthdme" name="SportHD" version="3.1.0" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.2.0" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -52,39 +52,30 @@
     <provides>video</provides>
   </extension>
   <extension point="xbmc.addon.metadata">
-    <summary lang="en">SportHD par chakir1981</summary>
-    <description lang="en">Flux sportifs de SportHD.me</description>
-    <disclaimer lang="en">Tous les flux de cet add-on sont hébergés sur des sites tiers et mis en ligne par d'autres personnes. Nous ne sommes pas responsables des contenus hébergés sur ces sites tiers. En cas de problème juridique, veuillez contacter les propriétaires/hébergeurs vidéo concernés.</disclaimer>
-          <language>EN</language>
+    <summary lang="fr">SportHD par chakir1981</summary>
+    <description lang="fr">Flux sportifs de SportHD.me</description>
+    <disclaimer lang="fr">Tous les flux de cet add-on sont hébergés sur des sites tiers et mis en ligne par d'autres personnes. Nous ne sommes pas responsables des contenus hébergés sur ces sites tiers. En cas de problème juridique, veuillez contacter les propriétaires/hébergeurs vidéo concernés.</disclaimer>
+          <language>FR</language>
     <license>GNU GPL, version 2</license>
     <news>
-      [B]v2.1.5[/B] 01/11/2026
-- Objectif : les matchs sans source française passent en français, avec une ouverture AUSSI RAPIDE que les chaînes déjà françaises.
-- Double porte : au clic, la chaîne est résolue en parallèle par Vavoo (rapide, ~0,4 s) et par LiveWatch (préparée à l'avance) — la première qui répond gagne, l'autre reste en secours si le flux casse.
-- Chasse élargie : plus de chaînes françaises retrouvées pour les matchs qui n'en avaient pas — le moteur Vavoo fouille un pool élargi, et la recherche directe dans le groupe France de LiveWatch (~930 chaînes) attrape des chaînes invisibles avant (beIN/Canal+/RMC numérotés…).
-- Toujours plus vite : le ticket d'ouverture est pré-acquis dès la liste des matchs et réutilisé une minute ; les flux préparés sont sauvegardés sur disque (ils survivent même à un redémarrage de Kodi pendant leur durée de vie).
-- v2.1.4 : les matchs sans aucune source française reçoivent 3 liens « Lien 1 / 2 / 3 » LiveWatch correspondant au match, résolutions différentes quand annoncées (4K / FHD / HD) ; Ligue1+ (flux 1 à 10) retrouvée ; fin des faux résultats EPG (contexte sportif exigé) ; multiplex proposés en plus.
-- v2.1.3 : croisement avec les agendas Futbol Libre / Futbol Libre Mov — pour un match sans source française, les liens rapides de ces agendas (mêmes liens que leurs menus) sont proposés avant les chaînes Vavoo, avec le titre réel du match.
-- Pour les matchs sans source française (balise [Vavoo]) : l'add-on cherche maintenant le même match dans les agendas Futbol Libre / Futbol Libre Mov — quand il y est, les liens rapides (ceux des menus Futbol Libre) sont proposés EN PREMIER avec leurs serveurs, avant les chaînes Vavoo, car ils démarrent plus vite. Exemple : « Ajax vs AZ » propose directement les serveurs de Futbol Libre Mov et Futbol Libre.
-- Le titre de l'événement trouvé s'affiche tel quel (ligue + équipes) pour vérification ; jusqu'à 4 sources rapides par match, dédoublonnées, les listes avec le plus de serveurs d'abord.
-- Les agendas rapides sont préchargés en arrière-plan à l'ouverture des listes de matchs (cache 10 min) : le croisement est instantané au clic.
-- Le filtre « Uniquement les sources françaises » ne masque plus les serveurs de ces sources de dépannage (noms génériques type « Server1 »).
-- v2.1.2 : dépannage instantané — la grille TV est enregistrée sur disque et tout est préchauffé en arrière-plan, plus d'attente au clic sur un match sans chaîne.
-- v2.1.1 : les chaînes Vavoo de dépannage sont choisies grâce à la vraie grille des programmes TV (EPG France) : la chaîne qui diffuse vraiment le match arrive en première, avec son horaire.
-- L'horaire du programme (ou « en direct ») s'affiche à côté de chaque chaîne proposée, et le libellé du programme TV figure dans sa description.
-- Le Diagnostic Vavoo affiche l'état de la grille TV (programmes chargés, chaînes suivies).
-- v2.1.0 : rattachement des chaînes Vavoo aux matchs sans source française — balise [Vavoo], chaînes de dépannage selon le sport et la compétition, essai automatique des variantes de la chaîne, réglage activé par défaut.
-- La lecture d'une chaîne Vavoo de dépannage essaie automatiquement les variantes de la chaîne si la première ne répond pas.
-- Nouveau réglage « Rattacher les chaînes Vavoo aux matchs sans source française (dépannage) » dans les paramètres (activé par défaut ; le comportement d'avant — masquer ces matchs — revient en le désactivant).
-- v2.0.9 : correctif — les chaînes Vavoo n'étaient plus masquées par le filtre « sources françaises » ; nouvel outil « Diagnostic Vavoo (dépannage) » (catalogue, signature, cache, lecture) avec vidage du cache.
-- v2.0.8 : correctif Vavoo — le catalogue est interrogé d'abord sans signature (le serveur de signatures vypn.net, parfois bloqué par les fournisseurs d'accès, n'est plus indispensable) ; message à l'écran si Vavoo est inaccessible.
-- v2.0.7 : retrait de la rubrique « Chaînes en direct (IPTV) » (listes iptv-org) ; « Chaînes Vavoo (France) » conservée.
-- v2.0.6 : nouvelle rubrique « Chaînes Vavoo (France) » : les bouquets français de la plateforme Vavoo. Les variantes d'une même chaîne sont proposées comme plusieurs serveurs. Flux authentifiés automatiquement à chaque lancement.
-- v2.0.5 : nouvelle rubrique « Chaînes en direct (IPTV) » (retirée en 2.0.7).
-- v2.0.4 : interface entièrement traduite en français : « Événements en direct », « Football Libre », « Football Libre MOV », sous-menus « Chaînes latino », « Sports USA », « Football en direct », descriptions et repli « Serveur ».
+      [B]v3.2.0[/B] 01/11/2026
+- Add-on recentré sur l'essentiel : les rubriques « Événements en direct » (bleue), « Football Libre », « Football Libre MOV » et « Grille TV Sport » sont supprimées.
+- Le menu principal ne garde que [B]ÉVÉNEMENTS EN DIRECT[/B] (avec les chaînes sport françaises 24/7 en secours : beIN, RMC, Canal+…) et les réglages.
+[B]v3.1.0[/B] 01/11/2026
+- Les matchs sans source française ne sont plus des impasses : [B]l'add-on propose désormais les chaînes sport françaises 24/7[/B] (beIN Sports 1-3 + MAX 4-10, RMC Sport 1-2, Canal+ / Sport / Foot / Sport360 / F1 / MotoGP, Eurosport, Tennis+, TF1) selon la compétition détectée (Premier League → RMC Sport, Champions League → Canal+, Liga/Serie A → beIN…).
+- Ces liens de secours s'affichent dans le même style que les liens français ([COLOR gold]Chaîne[/COLOR] - FR) et fonctionnent même avec le réglage « Uniquement les sources françaises ».
+- Nouveau réglage « Chaînes FR 24/7 : domaines Daddylive » pour suivre la rotation des domaines de cet écosystème.
+[B]v3.0.1[/B] 01/11/2026
+- La fiche de l'add-on s'affiche désormais en français (langue FR, résumé, description et avertissement balisés français) — le champ « Langue : EN » a été corrigé.
+[B]v3.0.0[/B] 01/11/2026
+- Retour aux sources : version reconstruite sur la base 2.0.4 (Événements en direct, Football Libre, Football Libre MOV) — les parties Vavoo et LiveWatch sont entièrement supprimées.
+- Nouvelle rubrique [B]GRILLE TV SPORT (FR)[/B] : programmes en cours et à venir des chaînes sport françaises (beIN Sports 1-3 + MAX 4-10, Canal+ Foot/Sport/Sport 360 + Live 1-19, Ligue 1+, RMC Sport 1-4, DAZN, Eurosport, TNT) avec titres exacts des matchs, affiches et horaires.
+- Source grille : XMLTV FR (xmltvfr.fr), mise à jour quotidienne (~02:45), ~9 jours d'avance, cache local 24 h — aucune clé, aucun compte.
+[B]Historique 2.0.x[/B]
+- v2.0.4 : interface entièrement traduite en français (« Événements en direct », « Football Libre », « Football Libre MOV », sous-menus « Chaînes latino », « Sports USA », « Football en direct »), descriptions et repli « Serveur ».
 - v2.0.3 : l'add-on est publié au nom de chakir1981.
-- v2.0.2 : correction du cache d'images de Kodi — les fichiers d'images sont renommés (icon2.png / fanart2.jpg) pour que le nouveau logo et le nouveau fanart s'affichent partout.
-- v2.0.1 : retour au menu classique (Événements en direct + sites annexes) ; réglage « Uniquement les sources françaises » dans les paramètres (activé par défaut) ; serveurs affichés « un », « deux », « trois ».
+- v2.0.2 : correction du cache d'images de Kodi — icône et fanart renommés (icon2.png / fanart2.jpg).
+- v2.0.1 : retour au menu classique ; réglage « Uniquement les sources françaises » (activé par défaut) ; serveurs affichés « un », « deux », « trois ».
     </news>
 
     <assets>

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.1.0" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.2.0" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -16,7 +16,10 @@
           <language>FR</language>
     <license>GNU GPL, version 2</license>
     <news>
-      [B]v3.1.0[/B] 01/11/2026
+      [B]v3.2.0[/B] 01/11/2026
+- Add-on recentré sur l'essentiel : les rubriques « Événements en direct » (bleue), « Football Libre », « Football Libre MOV » et « Grille TV Sport » sont supprimées.
+- Le menu principal ne garde que [B]ÉVÉNEMENTS EN DIRECT[/B] (avec les chaînes sport françaises 24/7 en secours : beIN, RMC, Canal+…) et les réglages.
+[B]v3.1.0[/B] 01/11/2026
 - Les matchs sans source française ne sont plus des impasses : [B]l'add-on propose désormais les chaînes sport françaises 24/7[/B] (beIN Sports 1-3 + MAX 4-10, RMC Sport 1-2, Canal+ / Sport / Foot / Sport360 / F1 / MotoGP, Eurosport, Tennis+, TF1) selon la compétition détectée (Premier League → RMC Sport, Champions League → Canal+, Liga/Serie A → beIN…).
 - Ces liens de secours s'affichent dans le même style que les liens français ([COLOR gold]Chaîne[/COLOR] - FR) et fonctionnent même avec le réglage « Uniquement les sources françaises ».
 - Nouveau réglage « Chaînes FR 24/7 : domaines Daddylive » pour suivre la rotation des domaines de cet écosystème.
