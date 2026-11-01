@@ -64,6 +64,7 @@ CHANNELS = {
     u'Tennis+ 2':        ('premium701', _LOGOS + 'Tennisplus.png'),
     u'Tennis+ 3':        ('premium702', _LOGOS + 'Tennisplus.png'),
     u'TF1':              ('premium469', _LOGOS + 'tf1-fr.png'),
+    u'M6':               ('premium470', _LOGOS + 'm6-france.png'),
 }
 
 # (motifs de compétition/sport, chaînes à proposer) — testé dans l'ordre,

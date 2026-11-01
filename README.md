@@ -22,4 +22,4 @@ Kodi propose automatiquement les mises à jour de SportHD ensuite.
 
 [**Code source de SportHD**](https://github.com/chakir1981/tonton.github.io/tree/master/plugin.video.sporthdme)
 
-Agenda sportif en direct : **ÉVÉNEMENTS EN DIRECT** — tous les matchs du jour, avec pour les rencontres dépourvues de source française des liens de secours vers les chaînes sport françaises 24/7 (beIN Sports 1-3 + MAX 4-10, RMC Sport 1-2, Canal+…). Un réglage « Uniquement les sources françaises » est disponible dans les paramètres de l'add-on.
+Agenda sportif en direct : **ÉVÉNEMENTS EN DIRECT** — tous les matchs du jour, avec pour les rencontres dépourvues de source française des liens de secours vers les chaînes sport françaises 24/7 (beIN Sports 1-3 + MAX 4-10, RMC Sport 1-2, Canal+…). Le programme TV de **footao.tv** permet de proposer **la chaîne qui diffuse vraiment le match** (réglage on/off), et les matchs avec sources françaises sont affichés en tête de liste. Un réglage « Uniquement les sources françaises » est disponible dans les paramètres de l'add-on.

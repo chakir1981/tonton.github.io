@@ -18,6 +18,10 @@ try:
     from resources.modules import dlch as dlch_mod
 except ImportError:
     dlch_mod = None
+try:
+    from resources.modules import footao as footao_mod
+except ImportError:
+    footao_mod = None
 import time
 from dateutil.parser import parse
 from dateutil.tz import gettz
@@ -147,6 +151,7 @@ def get_events(url):  # 5
         now_time_in_ms = datetime.now().timestamp() * 1000
     fr_only = _french_only()
     filtered_out = 0
+    _foot = None  # grille footao chargée à la demande (2 requêtes, cache 1 h)
     for match in matches:
         channels = match.get("channels", [])
         sport = match.get('sport', '') or ''
@@ -157,14 +162,6 @@ def get_events(url):  # 5
         team2 = match.get('team2', None)
         team2 = six.ensure_text(team2, encoding='utf-8', errors='replace') if team2 else None
         icon = match.get('team1Img', ICON)
-        if fr_only and not _channels_have_french(channels):
-            # Pas de chaîne FR sur le site : le match reste visible si les
-            # chaînes FR 24/7 (beIN, RMC, Canal+…) peuvent le couvrir.
-            _hint = u' '.join(x for x in (sport, lname, team1, team2) if x)
-            if dlch_mod is None or not dlch_mod.has_suggestion(_hint):
-                filtered_out += 1
-                continue
-        event = u"{} vs {}".format(team1, team2) if team1 and team2 else team1
 
         try:
             compare = match['startTimestamp']
@@ -180,6 +177,25 @@ def get_events(url):  # 5
                 compare = int('999999999999')
                 ftime = '-'
 
+        is_fr = _channels_have_french(channels)
+        if fr_only and not is_fr:
+            # Pas de chaîne FR sur le site : le match reste visible si les
+            # chaînes FR 24/7 (beIN, RMC, Canal+…) ou une diffusion française
+            # répertoriée par footao.tv peuvent le couvrir.
+            _hint = u' '.join(x for x in (sport, lname, team1, team2) if x)
+            _covered = (dlch_mod is not None and dlch_mod.has_suggestion(_hint))
+            if not _covered and footao_mod is not None and _use_footao() and team1:
+                if _foot is None:
+                    _foot = _footao_rows()
+                if _foot and footao_mod.find(_foot, team1, team2 or u'',
+                                             _event_day_ms(compare)):
+                    _covered = True
+            if not _covered:
+                filtered_out += 1
+                continue
+
+        event = u"{} vs {}".format(team1, team2) if team1 and team2 else team1
+
         duration_in_ms = match['duration'] * 60 * 1000
 
         is_live = False
@@ -189,14 +205,22 @@ def get_events(url):  # 5
         m_color = "lime" if is_live else "gold"
         ftime = u'[COLOR cyan]{}[/COLOR]'.format(ftime)
         name = u'{0} [COLOR {1}]{2}[/COLOR] - [I]{3}[/I]'.format(ftime, m_color, event, lname)
-        event_list.append([name, compare, channels, icon])
+        # Priorité visuelle : les matchs avec sources françaises d'abord ;
+        # les autres (visibles grâce aux chaînes FR 24/7 / footao.tv) sont
+        # repoussés sous la liste avec un repère discret quand le filtre
+        # « sources françaises » est actif.
+        _prio = 0 if is_fr else 1
+        if _prio and fr_only:
+            name += u' - [I][COLOR grey]FR 24/7[/COLOR][/I]'
+        _EVENT_DAYS[name] = _event_day_ms(compare)
+        event_list.append([name, compare, channels, icon, _prio])
 
         # streams = str(quote(base64.b64encode(six.ensure_binary(str(streams)))))
     if not event_list:
         if filtered_out:
             control.infoDialog(u"[COLOR gold]Aucune source française parmi les matchs du moment.[/COLOR]", NAME, ICON, 6000)
         return
-    events = sorted(event_list, key=lambda x: x[1])
+    events = sorted(event_list, key=lambda x: (x[4], x[1]))
     for event in deduplicate_events(events):
         streams = str(quote(base64.b64encode(six.ensure_binary(str(event[2])))))
         name = event[0]
@@ -234,6 +258,69 @@ def _french_only():
         return (ADDON.getSetting('french_only') or 'true').lower() == 'true'
     except Exception:
         return True
+
+
+def _use_footao():
+    """Réglage « footao.tv : la vraie chaîne des matchs sans source FR »."""
+    try:
+        return (ADDON.getSetting('use_footao') or 'true').lower() == 'true'
+    except Exception:
+        return True
+
+
+_FOOTAO_CACHE_FILE = 'footao_cache.json'
+
+
+def _footao_rows():
+    """Programme TV footao (aujourd'hui + demain), cache disque ~1 h."""
+    if footao_mod is None or not _use_footao():
+        return []
+    try:
+        import xbmcvfs
+        _tp = getattr(xbmcvfs, 'translatePath', None)
+        if _tp is None:
+            import xbmc as _xbmc
+            _tp = _xbmc.translatePath
+        _cache = _tp(ADDON_DATA + _FOOTAO_CACHE_FILE)
+    except Exception:
+        _cache = ''
+    try:
+        return footao_mod.load(client, _cache) or []
+    except Exception as e:
+        log_info('footao: {0!r}'.format(e))
+        return []
+
+
+# Jour (AAAA-MM-JJ) de chaque événement affiché, mémorisé à la construction
+# de la liste : au clic, sert à prioriser le match footao du même jour
+# (clef = libellé complet de l'élément).
+_EVENT_DAYS = {}
+
+
+def _event_day_ms(ms):
+    try:
+        return time.strftime('%Y-%m-%d', time.localtime(int(ms) / 1000.0))
+    except Exception:
+        return ''
+
+
+def _event_teams(label):
+    """Extrait (équipe1, équipe2) du libellé d'un événement.
+
+    Libellé : '[COLOR cyan]01-Nov, 17:30[/COLOR] [COLOR gold]T1 vs T2[/COLOR]
+    - [I]Ligue[/I]' -> ('T1', 'T2').
+    """
+    try:
+        txt = re.sub(r'\[[^\]]*\]', u'', label or u'')
+        txt = six.ensure_text(txt, encoding='utf-8', errors='replace').strip()
+        txt = re.sub(r'^\d{1,2}-\w{3},\s*\d{1,2}:\d{2}\s*', u'', txt)
+        head = txt.split(u' - ')[0].strip()
+        if u' vs ' in head:
+            _t1, _t2 = head.split(u' vs ', 1)
+            return _t1.strip(), _t2.strip()
+        return head, u''
+    except Exception:
+        return u'', u''
 
 
 def _is_french_source(name, lang):
@@ -324,11 +411,27 @@ def get_stream(name, url):  # 4
                 sstreams.append((url_, chan))
 
     if len(sstreams) < 1:
-        _sugg = dlch_mod.suggest(name) if dlch_mod is not None else []
-        if _sugg:
-            # Matchs sans source FR sur le site : liens de secours = chaînes
-            # FR 24/7 (beIN, RMC, Canal+…), même style que les liens français.
-            for _ch in _sugg:
+        # Matchs sans source FR sur le site : liens de secours = chaînes
+        # FR 24/7. La chaîne qui diffuse VRAIMENT le match (programme TV
+        # footao.tv) d'abord, puis les chaînes habituelles de la compétition.
+        _ordered, _seen, _frow = [], set(), None
+        if footao_mod is not None and _use_footao():
+            _t1, _t2 = _event_teams(name)
+            if _t1:
+                _frow = footao_mod.find(_footao_rows(), _t1, _t2,
+                                        _EVENT_DAYS.get(name, ''))
+                if _frow:
+                    _ch = footao_mod.channel_of(_frow)
+                    if _ch and dlch_mod is not None and _ch in dlch_mod.CHANNELS:
+                        _ordered.append(_ch)
+                        _seen.add(_ch)
+        if dlch_mod is not None:
+            for _ch in dlch_mod.suggest(name):
+                if _ch not in _seen:
+                    _seen.add(_ch)
+                    _ordered.append(_ch)
+        if _ordered:
+            for _ch in _ordered:
                 _pid, _logo = dlch_mod.CHANNELS[_ch]
                 _title = u'[COLOR gold]{0}[/COLOR] - FR'.format(_ch)
                 info = {'title': _title, 'sorttitle': '', 'plot': name}
@@ -336,6 +439,14 @@ def get_stream(name, url):  # 4
                        isFolder=False, infoLabels=info)
             xbmcplugin.setContent(_handle, 'videos')
             xbmcplugin.endOfDirectory(_handle)
+            return
+        if _frow is not None:
+            # footao connaît la diffusion (DAZN, Ligue 1+, Apple TV…) mais
+            # aucun flux n'est disponible ici pour cette chaîne.
+            control.infoDialog(
+                u"[COLOR gold]Ce match est diffusé sur {0} : pas de flux disponible pour cette chaîne.[/COLOR]".format(
+                    _frow.get('channel') or u'?'),
+                NAME, ICON, 7000)
             return
         if fr_only:
             control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]\n"
