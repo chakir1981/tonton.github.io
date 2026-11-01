@@ -17,6 +17,7 @@ from resources.modules import control, client
 from resources.modules import site_embedlivesports
 from resources.modules import site_futbollibre
 from resources.modules import site_futbolmov
+from resources.modules import site_daddylive
 import time
 from dateutil.parser import parse
 from dateutil.tz import gettz
@@ -26,7 +27,7 @@ from dateutil import parser, tz
 # module exposing NAME/KEY/list_events()/resolve() and append it here.
 # tvsport.guide is no longer a menu entry: it is the fallback schedule for
 # ÉVÉNEMENTS EN DIRECT and Événements en direct (see Live_fallback_url).
-EXTRA_SITES = [site_embedlivesports, site_futbollibre]
+EXTRA_SITES = [site_embedlivesports, site_futbollibre, site_daddylive]
 SITES = {s.KEY: s for s in EXTRA_SITES}
 # futbol-libre.mov: one main-menu entry -> its three lists (fmov_menu)
 SITES.update((s.KEY, s) for s in site_futbolmov.SUBSITES)
@@ -95,6 +96,14 @@ def Main_menu():
     # et « Football Libre MOV » ne sont plus proposées (les modules et les
     # modes du routeur restent en place, simplement sans entrée de menu).
     addDir(u'[B][COLOR white]ÉVÉNEMENTS EN DIRECT[/COLOR][/B]', Live_url, 'events', ICON, FANART, True)
+    # v3.6.1 — les deux rubriques DaddyLive (pépite + bonus) :
+    # planning FR du jour + chaînes françaises en continu.
+    addDir(u'[B][COLOR gold]Matchs du jour (FR)[/COLOR][/B]', site_daddylive.KEY,
+           'site_events', ICON, FANART, True,
+           infoLabels={'title': u'Matchs du jour (FR)', 'plot': site_daddylive.DESC})
+    addDir(u'[B][COLOR gold]Chaînes FR (24/7)[/COLOR][/B]', '', 'dlhd_247', ICON,
+           FANART, True,
+           infoLabels={'title': u'Chaînes FR (24/7)', 'plot': site_daddylive.DESC_247})
     # addDir('[B][COLOR gold]Channels 24/7[/COLOR][/B]', 'https://1.livesoccer.sx/program.php', 14, ICON, FANART, '')
     # addDir('[B][COLOR gold]Alternative VIEW [/COLOR][/B]', '', '', ICON, FANART, '')
     # addDir('[B][COLOR gold]Alternative LIVE EVENTS[/COLOR][/B]', Alt_url, 15, ICON, FANART, '')
@@ -233,7 +242,24 @@ def deduplicate_events(events):
 FRENCH_LANGS = ('fr', 'french', u'français', 'francais')
 FRENCH_NAME_RE = re.compile(
     r'\bfr\b|\[fr\]|\(fr\)|french|fran[cç]ais|\bfrance\b|canal\+\s*foot|rmc\s*sport|'
-    r'quipe|tf1\b|\bm6\b|\bw9\b|\btmc\b|ligue1')
+    r'quipe|tf1\b|\bm6\b|\bw9\b|\btmc\b|ligue1'
+    # v3.6.1 — chaînes FR DaddyLive sans suffixe « France » ni champ langue :
+    r'|bein sports (max )?\d+ france|eurosport \d+ france'
+    r'|canal\+|tennis\+|golf\+|\bfoot\+|automoto|motogp|infosport')
+
+# v3.6.1 — les variantes ÉTRANGÈRES des mêmes groupes (Canal+ Sport SK/CZ/
+# Poland, DAZN Spain/DE, beIN Arabic/Malaysia…) ne sont pas des sources
+# françaises même si leur nom contient une marque FR. Testé sur le nom en
+# minuscules, APRÈS le test de la langue explicite.
+NOT_FRENCH_NAME_RE = re.compile(
+    r'\b(sk|cz|pl|de|es|pt|it|nl|ro|rs|hr|bg|gr|tr|ua|ru)\b'
+    r'|poland|spain|deutschland|germany|portugal|italy|belgium|netherlands'
+    r'|nederland|romania|serbia|croatia|bulgaria|greece|hungary|slovakia'
+    r'|slovenia|ukraine|russia|arabia|arabic|mena|t[uü]rkiye|turkey|malaysia'
+    r'|australia|qatar|israel|kazakhstan|english|espa[nñ]ol|italiano'
+    r'|portugu[eè]s|deutsch|nederlands|scandinavia|sweden|norway|denmark'
+    r'|finland|usa',
+    re.IGNORECASE)
 
 
 def _french_only():
@@ -253,6 +279,8 @@ def _is_french_source(name, lang):
         return False
     if lang_s in FRENCH_LANGS:
         return True
+    if name_s and NOT_FRENCH_NAME_RE.search(name_s):
+        return False
     return bool(name_s and FRENCH_NAME_RE.search(name_s))
 
 
@@ -978,6 +1006,11 @@ def site_events_menu(key):
         except Exception as e:
             log_info('emls fallback failed: {0!r}'.format(e))
         key = site_futbollibre.KEY
+    if not events:
+        control.infoDialog(u"[COLOR red]Aucun événement disponible pour le moment.[/COLOR]",
+                           NAME, ICON, 5000)
+        xbmcplugin.endOfDirectory(_handle)
+        return
     fr_only = _french_only()
     shown = 0
     for e in events:
@@ -1071,6 +1104,41 @@ def site_streams_menu(payload):
     if not shown:
         control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]", NAME, ICON, 6000)
     xbmcplugin.setContent(_handle, 'videos')
+    xbmcplugin.endOfDirectory(_handle)
+
+
+def dlhd_247_menu():
+    """v3.6.1 — chaînes françaises en continu de DaddyLive (24-7-channels.php).
+
+    Chaque chaîne passe par le menu serveurs standard (site_streams ->
+    site_play) : une seule voie de lecture, le réglage « Uniquement les
+    sources françaises » s'applique naturellement.
+    """
+    try:
+        channels = site_daddylive.list_channels_247()
+    except Exception as e:
+        log_info('dlhd 247 failed: {0!r}'.format(e))
+        channels = []
+    if not channels:
+        control.infoDialog(u"[COLOR red]DaddyLive injoignable pour le moment.[/COLOR]",
+                           NAME, ICON, 5000)
+        xbmcplugin.endOfDirectory(_handle)
+        return
+    fr_only = _french_only()
+    shown = 0
+    for cname, curl in channels:
+        if fr_only and not site_daddylive.is_fr_channel(cname):
+            continue
+        payload = json.dumps({'k': site_daddylive.KEY, 's': [[cname, curl]],
+                              't': cname, 'p': ''})
+        info = {'title': cname, 'plot': u'Direct %s (DaddyLive)' % cname}
+        addDir(u'[B][COLOR gold]%s[/COLOR][/B]' % cname, payload,
+               'site_streams', ICON, cname, True, infoLabels=info)
+        shown += 1
+    if not shown:
+        control.infoDialog(u"[COLOR gold]Aucune chaîne française trouvée.[/COLOR]",
+                           NAME, ICON, 5000)
+    xbmcplugin.setContent(_handle, 'movies')
     xbmcplugin.endOfDirectory(_handle)
 
 
@@ -1173,6 +1241,8 @@ def router(paramstring):
             site_streams_menu(params['url'])
         elif params['mode'] == 'site_play':
             site_play(params['url'])
+        elif params['mode'] == 'dlhd_247':
+            dlhd_247_menu()
     else:
         Main_menu()
 

@@ -49,7 +49,9 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.6.0" provider-name="chakir1981">
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.6.1" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -66,7 +68,12 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
-      [B]v3.6.0[/B] 02/11/2026
+      [B]v3.6.1[/B] 02/11/2026
+- Nouvelle rubrique « Matchs du jour (FR) » : le planning DaddyLive du jour (thedaddy.pk) filtré sur les vraies chaînes françaises — beIN Sports 1/2/3 + MAX France, Canal+, Canal+ Sport/Foot/F1/MotoGP, RMC Sport, Ligue1+ (DAZN), Eurosport France, L'Équipe, Sport en France… soit ~45 matchs FR par jour, horaires convertis, statut en direct, chaînes miroirs en secours.
+- Nouvelle rubrique « Chaînes FR (24/7) » : ~40 chaînes françaises disponibles en continu (toutes les beIN/Canal+/RMC/DAZN Ligue1+/Eurosport France + TF1, M6, France 2-5, TMC, C8 pour les grands événements).
+- Résolution 2026 : page stream → iframe joueur → décodeur _econfig (base64, 4 blocs, réordonnancement [2,0,3,1]) avec repli playlist-token (SRC/CHANNEL/EDGE) et dernier recours m3u8 direct.
+- Basculement automatique de domaine (thedaddy.pk → dlive.sx → dlhd.pk) et filtrage « sources françaises » élargi (Tennis+, Golf+, foot+, Automoto, MotoGP, Infosport+).
+- [B]v3.6.0[/B] 02/11/2026
 - Add-on recentré sur l'essentiel : le menu ne garde que la rubrique « ÉVÉNEMENTS EN DIRECT » (affichée en blanc). Les rubriques bleues « Événements en direct » (doublon), « Football Libre » et « Football Libre MOV » sont retirées du menu.
 - v2.0.4 : interface entièrement traduite en français : « Événements en direct », « Football Libre », « Football Libre MOV », sous-menus « Chaînes latino », « Sports USA », « Football en direct », descriptions et repli « Serveur ».
 - v2.0.3 : l'add-on est publié au nom de chakir1981.
