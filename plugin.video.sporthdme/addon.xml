@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.5.0" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.5.1" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -16,7 +16,9 @@
           <language>FR</language>
     <license>GNU GPL, version 2</license>
     <news>
-      [B]v3.5.0[/B] 01/11/2026
+      [B]v3.5.1[/B] 01/11/2026
+- Le programme TV sport [B]Téléobs est retiré[/B] : le réglage « Programme TV sport (Téléobs) » disparaît et le guide TV français s'appuie uniquement sur [B]footao.tv[/B] (football). Le secours « sources françaises » et les liens de secours des matchs ne consultent plus que footao.tv.
+[B]v3.5.0[/B] 01/11/2026
 - [B]Événements en direct = le guide TV français[/B] : la liste n'affiche plus [B]que les matchs que footao.tv et le programme TV sport Téléobs placent sur une chaîne française du jour[/B] (football + NFL, NBA, hockey, rugby, tennis…), quel que soit les réglages choisis. Fini les rencontres sans diffusion française.
 - [B]La vraie chaîne est écrite sous chaque match[/B] (Canal+, beIN SPORTS 2, DAZN, L'Équipe…), comme sur footao.tv — avant même d'ouvrir le match.
 - La liste se [B]met à jour immédiatement[/B] quand vous changez les options (plus de liste conservée en cache). Si les deux guides sont désactivés ou indisponibles, retour au filtrage « sources françaises » habituel.

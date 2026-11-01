@@ -22,10 +22,6 @@ try:
     from resources.modules import footao as footao_mod
 except ImportError:
     footao_mod = None
-try:
-    from resources.modules import ptvsport as ptv_mod
-except ImportError:
-    ptv_mod = None
 import time
 from dateutil.parser import parse
 from dateutil.tz import gettz
@@ -155,16 +151,14 @@ def get_events(url):  # 5
         now_time_in_ms = datetime.now().timestamp() * 1000
     fr_only = _french_only()
     filtered_out = 0
-    # Vue « guide TV français » (v3.5.0) : tant que footao.tv et/ou le
-    # programme TV sport Téléobs renvoient des programmes, la liste
-    # n'affiche QUE les matchs que ces deux guides placent sur une chaîne
-    # française du jour — quel que soit les autres réglages. La vraie
-    # chaîne est écrite sous chaque match. Si les deux guides sont
-    # désactivés ou indisponibles, on revient au filtrage précédent
+    # Vue « guide TV français » (v3.5.0) : tant que footao.tv renvoie des
+    # programmes, la liste n'affiche QUE les matchs que ce guide place sur
+    # une chaîne française du jour — quel que soit les autres réglages. La
+    # vraie chaîne est écrite sous chaque match. Si le guide est désactivé
+    # ou indisponible, on revient au filtrage précédent
     # (« sources françaises » + chaînes FR 24/7).
     _foot = _footao_rows() if _use_footao() else []
-    _ptv = _ptv_rows() if _use_ptvsport() else []
-    guide_mode = bool(_foot or _ptv)
+    guide_mode = bool(_foot)
     for match in matches:
         channels = match.get("channels", [])
         sport = match.get('sport', '') or ''
@@ -195,13 +189,9 @@ def get_events(url):  # 5
             # On ne garde que les matchs du guide TV français (même jour,
             # rapprochement des équipes ≥ 0.7) : tout le reste est masqué.
             _row = None
-            if team1:
-                if _foot:
-                    _row = footao_mod.find(_foot, team1, team2 or u'',
-                                           _event_day_ms(compare))
-                if _row is None and _ptv:
-                    _row = ptv_mod.find(_ptv, team1, team2 or u'',
-                                        _event_day_ms(compare))
+            if team1 and _foot:
+                _row = footao_mod.find(_foot, team1, team2 or u'',
+                                       _event_day_ms(compare))
             if _row is None:
                 filtered_out += 1
                 continue
@@ -210,17 +200,13 @@ def get_events(url):  # 5
             is_fr = _channels_have_french(channels)
             if fr_only and not is_fr:
                 # Pas de chaîne FR sur le site : le match reste visible si les
-                # chaînes FR 24/7 (beIN, RMC, Canal+…) ou une diffusion française
-                # répertoriée par footao.tv / Téléobs peuvent le couvrir.
+                # chaînes FR 24/7 (beIN, RMC, Canal+…) ou une diffusion
+                # française répertoriée par footao.tv peuvent le couvrir.
                 _hint = u' '.join(x for x in (sport, lname, team1, team2) if x)
                 _covered = (dlch_mod is not None and dlch_mod.has_suggestion(_hint))
                 if not _covered and footao_mod is not None and _foot and team1:
                     if footao_mod.find(_foot, team1, team2 or u'',
                                        _event_day_ms(compare)):
-                        _covered = True
-                if not _covered and ptv_mod is not None and _ptv and team1:
-                    if ptv_mod.find(_ptv, team1, team2 or u'',
-                                    _event_day_ms(compare)):
                         _covered = True
                 if not _covered:
                     filtered_out += 1
@@ -257,7 +243,7 @@ def get_events(url):  # 5
         # streams = str(quote(base64.b64encode(six.ensure_binary(str(streams)))))
     if not event_list:
         if guide_mode:
-            control.infoDialog(u"[COLOR gold]Aucun match sur les chaînes françaises du jour (footao.tv / Téléobs).[/COLOR]", NAME, ICON, 6000)
+            control.infoDialog(u"[COLOR gold]Aucun match sur les chaînes françaises du jour (footao.tv).[/COLOR]", NAME, ICON, 6000)
         elif filtered_out:
             control.infoDialog(u"[COLOR gold]Aucune source française parmi les matchs du moment.[/COLOR]", NAME, ICON, 6000)
         return
@@ -269,8 +255,8 @@ def get_events(url):  # 5
         addDir(name, streams, 'get_streams', icon, FANART, isFolder=True)
 
     xbmcplugin.setContent(_handle, 'videos')
-    # Liste vivante : jamais de cache disque. Changer une option (guides
-    # footao.tv / Téléobs, fuseau…) puis rouvrir « ÉVÉNEMENTS EN DIRECT »
+    # Liste vivante : jamais de cache disque. Changer une option (guide
+    # footao.tv, fuseau…) puis rouvrir « ÉVÉNEMENTS EN DIRECT »
     # suffit pour voir la nouvelle liste.
     xbmcplugin.endOfDirectory(_handle, cacheToDisc=False)
 
@@ -312,14 +298,6 @@ def _use_footao():
         return True
 
 
-def _use_ptvsport():
-    """Réglage « Programme TV sport Téléobs : tous sports »."""
-    try:
-        return (ADDON.getSetting('use_ptvsport') or 'true').lower() == 'true'
-    except Exception:
-        return True
-
-
 _FOOTAO_CACHE_FILE = 'footao_cache.json'
 
 
@@ -340,29 +318,6 @@ def _footao_rows():
         return footao_mod.load(client, _cache) or []
     except Exception as e:
         log_info('footao: {0!r}'.format(e))
-        return []
-
-
-_PTV_CACHE_FILE = 'ptvsport_cache.json'
-
-
-def _ptv_rows():
-    """Programme TV sport Téléobs du jour, cache disque ~1 h."""
-    if ptv_mod is None or not _use_ptvsport():
-        return []
-    try:
-        import xbmcvfs
-        _tp = getattr(xbmcvfs, 'translatePath', None)
-        if _tp is None:
-            import xbmc as _xbmc
-            _tp = _xbmc.translatePath
-        _cache = _tp(ADDON_DATA + _PTV_CACHE_FILE)
-    except Exception:
-        _cache = ''
-    try:
-        return ptv_mod.load(client, _cache) or []
-    except Exception as e:
-        log_info('ptvsport: {0!r}'.format(e))
         return []
 
 
@@ -488,25 +443,14 @@ def get_stream(name, url):  # 4
     if len(sstreams) < 1:
         # Matchs sans source FR sur le site : liens de secours = chaînes
         # FR 24/7. La chaîne qui diffuse VRAIMENT le match d'abord (programme
-        # TV footao.tv pour le football, programme TV sport Téléobs pour tous
-        # les sports), puis les chaînes habituelles de la compétition.
-        _ordered, _seen, _frow, _nrow = [], set(), None, None
+        # TV footao.tv), puis les chaînes habituelles de la compétition.
+        _ordered, _seen, _frow = [], set(), None
         _t1, _t2 = _event_teams(name)
         if footao_mod is not None and _use_footao() and _t1:
             _frow = footao_mod.find(_footao_rows(), _t1, _t2,
                                     _EVENT_DAYS.get(name, ''))
             if _frow:
                 _ch = footao_mod.channel_of(_frow)
-                if _ch and dlch_mod is not None and _ch in dlch_mod.CHANNELS:
-                    _ordered.append(_ch)
-                    _seen.add(_ch)
-        # Programme TV sport Téléobs (tous sports) : complète footao quand il
-        # n'a rien donné de résoluble (NFL sur beIN/L'Équipe, NBA, hockey…).
-        if ptv_mod is not None and _use_ptvsport() and _t1 and not _seen:
-            _nrow = ptv_mod.find(_ptv_rows(), _t1, _t2,
-                                 _EVENT_DAYS.get(name, ''))
-            if _nrow:
-                _ch = ptv_mod.channel_of(_nrow)
                 if _ch and dlch_mod is not None and _ch in dlch_mod.CHANNELS:
                     _ordered.append(_ch)
                     _seen.add(_ch)
@@ -525,10 +469,10 @@ def get_stream(name, url):  # 4
             xbmcplugin.setContent(_handle, 'videos')
             xbmcplugin.endOfDirectory(_handle)
             return
-        if _frow is not None or _nrow is not None:
+        if _frow is not None:
             # Le programme TV connaît la diffusion (DAZN, Ligue 1+, Apple TV,
             # TFX…) mais aucun flux n'est disponible ici pour cette chaîne.
-            _lbl = (_frow.get('channel') if _frow else None) or (_nrow.get('channel') if _nrow else None) or u'?'
+            _lbl = _frow.get('channel') or u'?'
             control.infoDialog(
                 u"[COLOR gold]Ce match est diffusé sur {0} : pas de flux disponible pour cette chaîne.[/COLOR]".format(_lbl),
                 NAME, ICON, 7000)
