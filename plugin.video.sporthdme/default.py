@@ -21,6 +21,10 @@ try:
     from resources.modules import epg as epg_mod
 except ImportError:
     epg_mod = None
+try:
+    from resources.modules import dlch as dlch_mod
+except ImportError:
+    dlch_mod = None
 import time
 from dateutil.parser import parse
 from dateutil.tz import gettz
@@ -171,19 +175,21 @@ def get_events(url):  # 5
     filtered_out = 0
     for match in matches:
         channels = match.get("channels", [])
-        if fr_only and not _channels_have_french(channels):
-            filtered_out += 1
-            continue
-        # links = match['additionalLinks']
-        # links.extend(match['channels'])
-        icon = match.get('team1Img', ICON)
-        sport = match.get('sport', '')
+        sport = match.get('sport', '') or ''
         lname = match.get('league', None)
         lname = six.ensure_text(lname, encoding='utf-8', errors='replace') if lname else sport
         team1 = match.get('team1', None)
         team1 = six.ensure_text(team1, encoding='utf-8', errors='replace') if team1 else None
         team2 = match.get('team2', None)
         team2 = six.ensure_text(team2, encoding='utf-8', errors='replace') if team2 else None
+        icon = match.get('team1Img', ICON)
+        if fr_only and not _channels_have_french(channels):
+            # Pas de chaîne FR sur le site : le match reste visible si les
+            # chaînes FR 24/7 (beIN, RMC, Canal+…) peuvent le couvrir.
+            _hint = u' '.join(x for x in (sport, lname, team1, team2) if x)
+            if dlch_mod is None or not dlch_mod.has_suggestion(_hint):
+                filtered_out += 1
+                continue
         event = u"{} vs {}".format(team1, team2) if team1 and team2 else team1
 
         try:
@@ -359,6 +365,19 @@ def get_stream(name, url):  # 4
                 sstreams.append((url_, chan))
 
     if len(sstreams) < 1:
+        _sugg = dlch_mod.suggest(name) if dlch_mod is not None else []
+        if _sugg:
+            # Matchs sans source FR sur le site : liens de secours = chaînes
+            # FR 24/7 (beIN, RMC, Canal+…), même style que les liens français.
+            for _ch in _sugg:
+                _pid, _logo = dlch_mod.CHANNELS[_ch]
+                _title = u'[COLOR gold]{0}[/COLOR] - FR'.format(_ch)
+                info = {'title': _title, 'sorttitle': '', 'plot': name}
+                addDir(_title, 'dlch://' + _pid, 'play_stream', _logo or ICON, name,
+                       isFolder=False, infoLabels=info)
+            xbmcplugin.setContent(_handle, 'videos')
+            xbmcplugin.endOfDirectory(_handle)
+            return
         if fr_only:
             control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]\n"
                                u"[COLOR lime]Réglage : « Uniquement les sources françaises » dans les paramètres.[/COLOR]",
@@ -399,8 +418,29 @@ def resolve2(name, url):
     # new_streams = ['//dabac']
     log_info('RESOLVE-URL: {0}'.format(url))
 
+    # NOUVELLE BRANCHE : chaînes FR 24/7 (dlch://premium{N}, grille Daddylive)
+    if url.startswith('dlch://'):
+        Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
+        if dlch_mod is None:
+            control.infoDialog(u'[COLOR red]Module chaînes FR indisponible.[/COLOR]', NAME, ICON, 5000)
+            return
+        try:
+            _dl_domains = ADDON.getSetting('dl_domains') or dlch_mod.DEFAULT_DOMAINS
+        except Exception:
+            _dl_domains = dlch_mod.DEFAULT_DOMAINS
+        _dl_domains = [d for d in _dl_domains.split(',') if d.strip()]
+        _res = dlch_mod.resolve(url[7:], _dl_domains, client)
+        if not _res:
+            control.infoDialog(u'[COLOR red]Chaîne momentanément indisponible.[/COLOR]\n'
+                               u'[COLOR gold]Mets à jour les domaines Daddylive dans les paramètres.[/COLOR]',
+                               NAME, ICON, 7000)
+            return
+        _flink, _dom = _res
+        stream_headers = {'Referer': 'https://{0}/'.format(_dom), 'Origin': 'https://{0}'.format(_dom),
+                          'User-Agent': dlch_mod.DL_UA, 'Connection': 'keep-alive'}
+        stream_url = xbmc_curl_encode(_flink, stream_headers)
     # NEW GLISCO/SANSAT BRANCH
-    if '//glisco' in url or '//sansat' in url or 'vertex' in url or 'nexa' in url or 'kora.st' in url:
+    elif '//glisco' in url or '//sansat' in url or 'vertex' in url or 'nexa' in url or 'kora.st' in url:
         Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
         chan_id = url.split('id=')[-1]
 
