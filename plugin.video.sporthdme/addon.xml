@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.3.0" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.4.0" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -16,7 +16,11 @@
           <language>FR</language>
     <license>GNU GPL, version 2</license>
     <news>
-      [B]v3.3.0[/B] 01/11/2026
+      [B]v3.4.0[/B] 01/11/2026
+- [B]Programme TV sport Téléobs (tous sports)[/B] en complément de footao.tv : pour les matchs sans source française, la [B]vraie chaîne du jour[/B] remplace la supposition par compétition — NFL sur beIN 2/3 ou L’Équipe (et non beIN MAX deviné), NBA sur beIN 1, hockey, rugby, tennis… (beIN 1-3, Canal+ / Foot / Sport / Sport 360, Eurosport 1-2, L’Équipe, TF1, M6).
+- Si footao.tv connaît la diffusion mais sans flux (DAZN, Canal+ Live…), la chaîne TV résoluble du programme Téléobs est proposée à sa place quand elle existe.
+- Nouveau réglage on/off « Programme TV sport (Téléobs) » (activé par défaut) ; lecture du programme en 1 seule requête, cache 1 h.
+[B]v3.3.0[/B] 01/11/2026
 - Le bon lien pour les matchs sans source française : l'add-on consulte désormais le [B]programme TV de footao.tv[/B] et propose [B]la chaîne qui diffuse vraiment le match[/B] (Liverpool - Arsenal sur Canal+ ? vous aurez Canal+, pas une supposition). En secours : les chaînes habituelles de la compétition, comme avant.
 - Les matchs [B]avec sources françaises passent en tête de liste[/B] ; les autres (couverts par les chaînes 24/7 ou footao) sont repoussés sous la liste avec un repère discret « FR 24/7 ».
 - M6 rejoint les chaînes FR 24/7 disponibles. Nouveau réglage on/off « footao.tv » (activé par défaut).
