@@ -245,7 +245,9 @@ FRENCH_NAME_RE = re.compile(
     r'quipe|tf1\b|\bm6\b|\bw9\b|\btmc\b|ligue1'
     # v3.6.1 — chaînes FR DaddyLive sans suffixe « France » ni champ langue :
     r'|bein sports (max )?\d+ france|eurosport \d+ france'
-    r'|canal\+|tennis\+|golf\+|\bfoot\+|automoto|motogp|infosport')
+    r'|canal\+|tennis\+|golf\+|\bfoot\+|automoto|motogp|infosport'
+    # v3.6.2 — chaînes FR ajoutées par l'enrichissement footao :
+    r'|6ter|\barte\b|\bc8\b|\blci\b|\bbfm\b')
 
 # v3.6.1 — les variantes ÉTRANGÈRES des mêmes groupes (Canal+ Sport SK/CZ/
 # Poland, DAZN Spain/DE, beIN Arabic/Malaysia…) ne sont pas des sources
@@ -1087,7 +1089,19 @@ def fmov_search():
 def site_streams_menu(payload):
     d = json.loads(payload)
     poster = d.get('p') or ICON
-    title = d.get('t', '')
+    title = six.ensure_text(d.get('t', ''), encoding='utf-8', errors='replace')
+    is_match = bool(d.get('t')) and u' vs ' in six.ensure_text(
+        d.get('t', ''), encoding='utf-8', errors='replace')
+    if d.get('k') == site_daddylive.KEY and is_match:
+        # v3.6.2 — enrichissement footao : quand la grille DaddyLive ne
+        # liste qu'une chaîne FR, footao en donne souvent une seconde
+        # (diffuseur1/diffuseur2). Échec silencieux : on garde la grille.
+        try:
+            d['s'] = site_daddylive.enrich_servers(
+                six.ensure_text(d.get('t', ''), encoding='utf-8',
+                                errors='replace'), d['s'])
+        except Exception as e:
+            log_info('footao enrich failed: {0!r}'.format(e))
     fr_only = _french_only()
     shown = 0
     for sname, surl in d['s']:
@@ -1101,6 +1115,15 @@ def site_streams_menu(payload):
                json.dumps({'k': d['k'], 'u': surl, 't': title, 'p': d.get('p', '')}),
                'site_play', poster, title, isFolder=False, infoLabels=info)
         shown += 1
+        # v3.6.2 — second lien « (repli) » pour chaque chaîne DaddyLive d'un
+        # match : résolution directe par playlist-token (saute _econfig).
+        # Si l'un des deux résolveurs casse, l'autre reste jouable.
+        if d.get('k') == site_daddylive.KEY and is_match:
+            addDir(u'[B]{0} (repli)[/B]'.format(sname),
+                   json.dumps({'k': d['k'], 'u': surl, 't': title,
+                               'p': d.get('p', ''), 'f': '1'}),
+                   'site_play', poster, title, isFolder=False, infoLabels=info)
+            shown += 1
     if not shown:
         control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]", NAME, ICON, 6000)
     xbmcplugin.setContent(_handle, 'videos')
@@ -1148,7 +1171,11 @@ def site_play(payload):
     title = d.get('t') or NAME
     poster = d.get('p') or ICON
     Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
-    result = site.resolve(d['u'])
+    if d['k'] == site_daddylive.KEY:
+        # v3.6.2 — drapeau f=1 : « lien (repli) » -> résolution playlist-token
+        result = site.resolve(d['u'], prefer_fallback=bool(d.get('f')))
+    else:
+        result = site.resolve(d['u'])
     if not result:
         raise Exception('could not resolve stream for ' + d['u'])
     # resolve() normally returns just the m3u8 string; sites that chain

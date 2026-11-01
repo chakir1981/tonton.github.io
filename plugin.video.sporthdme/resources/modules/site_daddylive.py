@@ -339,6 +339,383 @@ def list_channels_247():
 
 
 # ---------------------------------------------------------------------------
+# v3.6.2 — enrichissement footao (footao.tv) : quand la grille DaddyLive ne
+# liste qu'une seule chaîne FR pour un match, footao en donne souvent une
+# seconde (diffuseur1/diffuseur2). On interroge la page club footao du match,
+# on le retrouve par équipes, et on ajoute les chaînes FR manquantes via les
+# IDs DaddyLive connus de la liste 24/7.
+# Technique issue de developpeurbox/hass-footao (maj 2026-10-29) :
+#   programmetv.php?eq=<club>  ->  redirection JS window.location.replace
+#   ->  page club avec <div itemscope SportsEvent> (matchs « riches »,
+#       content="YYYY-MM-DDTHH:MM", icône diffuseur
+#       match-canal-foot-direct-live-ce-soir) et <div class="fin"> (du jour).
+# ---------------------------------------------------------------------------
+
+FOOTAO_BASE = 'https://www.footao.tv'
+FOOTAO_TTL = 3600          # cache club = 1 h (comme hass-footao)
+_ftao_cache = {}           # eq -> (horloge, [matchs])
+
+# clubs.json de developpeurbox/hass-footao (Ligue 1, Ligue 2, Liga, Serie A,
+# Premier League, Bundesliga, Europe, Équipe Nationale) — nom affiché -> slug
+# footao « eq » (les valeurs à « | » sont des alias acceptés par le site).
+FOOTAO_CLUBS = {
+    "AC Milan": "Milan", "Alaves": "Alaves", "Algérie": "Algerie",
+    "Allemagne": "Allemagne", "Anderlecht": "Anderlecht",
+    "Angers": "Angers", "Angleterre": "Angleterre", "Annecy": "Annecy",
+    "Ajaccio": "Ajaccio", "Amiens": "Amiens", "Argentine": "Argentine", "Arsenal": "Arsenal",
+    "Aston Villa": "Aston Villa", "Atalanta": "Atalanta",
+    "Athletic Bilbao": "Bilbao|Athletic Bilbao",
+    "Atletico Madrid": "Atlético", "Augsbourg": "Augsbourg",
+    "Australie": "Australie", "Autriche": "Autriche", "Auxerre": "Auxerre",
+    "Barcelona": "Barcelone", "Bayern Munich": "Bayern",
+    "Belgique": "Belgique", "Besiktas": "Besiktas", "Bologna": "Bologne",
+    "Bosnie": "Bosnie", "Boulogne": "Boulogne", "Bastia": "Bastia",
+    "Bournemouth": "Bournemouth", "Brentford": "Brentford",
+    "Bresil": "Bresil", "Brest": "Brest", "Brighton": "Brighton",
+    "Bétis": "Bétis", "Cagliari": "Cagliari", "Canada": "Canada",
+    "CapVert": "CapVert", "Celta Vigo": "Celta Vigo", "Chelsea": "Chelsea",
+    "Clermont": "Clermont", "Cologne": "Cologne", "Colombie": "Colombie",
+    "Como": "Como", "Coventry": "Coventry City", "Croatie": "Croatie",
+    "Crystal Palace": "Crystal P.|Crystal Palace", "Curacao": "Curacao",
+    "Côte d'Ivoire": "Côte d’Ivoire|Cote d'Ivoire|Côte d'Ivoire",
+    "Deportivo": "Deportivo La Corogne|Deportivo de A Coruña",
+    "Dijon": "Dijon", "Dortmund": "Dortmund", "Dunkerque": "Dunkerque",
+    "Elche": "Elche", "Elversberg": "Elversberg", "Espagne": "Espagne",
+    "Espanyol": "Espanyol B.|Espanyol Barcelone", "Everton": "Everton",
+    "Fiorentina": "Fiorentina", "France": "France",
+    "Francfort": "Francfort E.|Eintracht Francfort",
+    "Fribourg": "Fribourg", "Frosinone": "Frosinone", "Fulham": "Fulham",
+    "Genoa": "Genoa||G&ecirc;nes", "Getafe": "Getafe", "Ghana": "Ghana",
+    "Grenoble": "Grenoble", "Guingamp": "Guingamp", "Hamburg": "Hambourg",
+    "Hoffenheim": "Hoffenheim", "Hull City": "Hull City",
+    "Inter Milan": "Inter", "Ipswich": "Ipswich Town", "Iran": "Iran",
+    "Italie": "Italie", "Japon": "Japon", "Juventus": "Juventus",
+    "Laval": "Laval", "Lazio": "Lazio", "Le Havre": "Le Havre",
+    "Le Mans": "Le Mans", "Lecce": "Lecce", "Leeds": "Leeds",
+    "Leipzig": "Leipzig", "Lens": "Lens", "Levante": "Levante UD",
+    "Leverkusen": "Leverkusen|Bayer Leverkusen", "Lille": "Lille",
+    "Liverpool": "Liverpool", "Lorient": "Lorient", "Lyon": "Lyon OL",
+    "Malaga": "Malaga", "Manchester City": "Manchester C.",
+    "Manchester Utd": "Manchester U.", "Maroc": "Maroc",
+    "Marseille": "Marseille OM", "Mayence": "Mayence FSV", "Metz": "Metz",
+    "Mexique": "Mexique", "Monaco": "Monaco",
+    "Monchengladbach": "Monchengladbach", "Montpellier": "Montpellier",
+    "Monza": "Monza", "Nancy": "Nancy", "Nantes": "Nantes",
+    "Naples": "Naples", "Newcastle": "Newcastle", "Nice": "Nice",
+    "Norvège": "Norvege", "Nottingham": "Nottingham", "Osasuna": "Osasuna",
+    "Paderborn": "Paderborn", "Paris FC": "Paris FC", "Parme": "Parme",
+    "Pau": "Pau", "Pays-Bas": "Pays-Bas%7C%7CHollande",
+    "Portugal": "Portugal", "PSG": "Paris PSG",
+    "Racing Santander": "Racing Santander|Racing de Santander",
+    "Rayo Vallecano": "Rayo V.|Rayo Vallecano",
+    "Real Madrid": "Real Madrid",
+    "Real Sociedad": "R. Sociedad|Real Sociedad", "Red Star": "Red Star",
+    "Reims": "Reims", "Rennes": "Rennes", "Rodez": "Rodez", "Roma": "Roma",
+    "Saint-Etienne": "Saint-Etienne", "Sassuolo": "Sassuolo",
+    "Schalke": "Schalke", "Sochaux": "Sochaux", "Strasbourg": "Strasbourg",
+    "Stuttgart": "Stuttgart", "Suisse": "Suisse",
+    "Sunderland": "Sunderland", "Sénégal": "Senegal",
+    "Séville": "Séville FC", "Tchéquie": "Tchequie", "Torino": "Torino",
+    "Tottenham": "Tottenham", "Toulouse": "Toulouse", "Troyes": "Troyes",
+    "Tunisie": "Tunisie", "Turquie": "Turquie", "Udinese": "Udinese",
+    "Union Berlin": "Union B.|Union Berlin", "Uruguay": "Uruguay",
+    "Valenciennes": "Valenciennes", "Versailles": "Versailles",
+    "Villefranche": "Villefranche", "Quevilly": "Quevilly",
+    "Nîmes": "Nimes", "Orléans": "Orleans", "Châteauroux": "Chateauroux",
+    "Valencia": "Valence CF", "Venezia": "Venezia",
+    "Villarreal": "Villarreal",
+    "Werder Brême": "Werder|Werder Br&ecirc;me", "Égypte": "Egypte",
+    "États-Unis": "Etats-Unis%7C%7CUSA%20Am%26eacute%3Brique",
+}
+
+# alias DaddyLive -> clé de FOOTAO_CLUBS (normalisés sans accents)
+_FTAO_ALIAS = {
+    'om': 'marseille', 'ol': 'lyon', 'ogc nice': 'nice',
+    'stade brestois': 'brest', 'stade brestois 29': 'brest',
+    'paris saint germain': 'psg', 'olympique marseille': 'marseille',
+    'olympique de marseille': 'marseille', 'olympique lyonnais': 'lyon',
+    'as monaco': 'monaco', 'rc lens': 'lens', 'losc': 'lille',
+    'losc lille': 'lille', 'stade rennais': 'rennes', 'fc rennes': 'rennes',
+    'atletico': 'atletico madrid', 'atletico madrid': 'atletico madrid',
+    'eintracht frankfurt': 'francfort', 'koln': 'cologne',
+    'fc koln': 'cologne', 'hamburger sv': 'hamburg',
+    'bayer leverkusen': 'leverkusen', 'newcastle united': 'newcastle',
+    'west ham united': 'west ham', 'leeds united': 'leeds',
+    'stade rennais fc': 'rennes',
+    'bayern': 'bayern munich', 'man city': 'manchester city',
+    'man utd': 'manchester utd', 'manchester united': 'manchester utd',
+    'tottenham hotspur': 'tottenham', 'inter': 'inter milan',
+    'milan': 'ac milan', 'psg paris': 'psg', 'sporting cp': 'sporting',
+}
+
+# nom footao (normalisé) -> (nom DaddyLive, id watch)
+FOOTAO_CHAN_ID = {
+    'canal+ foot': ('Canal+ Foot France', 463),
+    'canal+': ('Canal+ France', 121),
+    'canal+ sport': ('Canal+ Sport France', 122),
+    'canal+ sport 360': ('Canal+ Sport 360', 464),
+    'canal+ sport360': ('Canal+ Sport 360', 464),
+    'canal+ f1': ('Canal+ Formula 1', 273),
+    'canal+ formula 1': ('Canal+ Formula 1', 273),
+    'canal+ motogp': ('CANAL+ MotoGP France', 271),
+    'bein sports 1': ('beIN Sports 1 France', 116),
+    'bein sports 2': ('beIN Sports 2 France', 117),
+    'bein sports 3': ('beIN Sports 3 France', 118),
+    'bein sports max 4': ('beIN Sports MAX 4 France', 494),
+    'bein sports max 5': ('beIN Sports MAX 5 France', 495),
+    'bein sports max 6': ('beIN Sports MAX 6 France', 496),
+    'bein sports max 7': ('beIN Sports MAX 7 France', 497),
+    'bein sports max 8': ('beIN Sports MAX 8 France', 498),
+    'bein sports max 9': ('beIN Sports MAX 9 France', 499),
+    'bein sports max 10': ('beIN Sports MAX 10 France', 500),
+    'rmc sport 1': ('RMC Sport 1 France', 119),
+    'rmc sport 2': ('RMC Sport 2 France', 120),
+    'ligue1+': ('DAZN Ligue 1 France', 960),
+    'ligue 1+': ('DAZN Ligue 1 France', 960),
+    'dazn ligue 1': ('DAZN Ligue 1 France', 960),
+    'dazn ligue1+': ('DAZN Ligue 1 France', 960),
+    'eurosport 1': ('Eurosport 1 France', 772),
+    'eurosport 2': ('Eurosport 2 France', 773),
+    "l'equipe": ("L'Équipe France", 645),
+    'lequipe': ("L'Équipe France", 645),
+    'sport en france': ('Sport en France', 965),
+    'tennis+': ('Tennis+ 10', 709),
+    'automoto': ('Automoto la chaîne', 961),
+    'tf1': ('TF1 France', 469),
+    'm6': ('M6 France', 470),
+    'w9': ('W9 France', 959),
+    'tmc': ('TMC France', 955),
+    'c8': ('C8 France', 956),
+    'france 2': ('France 2', 950),
+    'france 3': ('France 3', 951),
+    'france 4': ('France 4', 952),
+    'france 5': ('France 5', 953),
+    '6ter': ('6ter France', 963),
+    'arte': ('Arte France', 958),
+}
+
+_FTAO_SIMPLE_RE = re.compile(
+    r'<div class="fin">\s*<time[^>]*>(\d{2}:\d{2})</time>(.*?)</div>', re.DOTALL)
+_FTAO_RICH_RE = re.compile(
+    r'<div itemscope itemtype="[^"]*SportsEvent">(.*?)</div>', re.DOTALL)
+_FTAO_DT_RE = re.compile(r'content="(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})"')
+_FTAO_CHAN_RE = re.compile(
+    r'/match-([a-z0-9-]*?)-direct-live[^"]*"[^>]*>\s*<img[^>]*'
+    r'alt="match ([^"]+?)(?:\s*foot)?\s*programme soir"', re.IGNORECASE)
+_FTAO_RC_RE = re.compile(r'<a[^>]*class="rc"[^>]*>(.*?)</a>', re.DOTALL)
+_FTAO_TEAM_SEP_RE = re.compile(r'\s*(?:&#183;|&middot;|·)\s*')
+_FTAO_SUFFIX_RE = re.compile(
+    r'\s*\b(f[ée]m\.?|fem(?:mes|inine)?\.?|hope?es|r[ée]serv[ée]s?|'
+    r'(?:u|under)[- ]?\d{1,2}|jeunes)\s*$', re.IGNORECASE)
+
+
+def _norm_team(s):
+    """clé de comparaison : minuscules, sans accents ni ponctuation."""
+    s = _unescape((s or u'')).strip().lower()
+    try:
+        import unicodedata
+        s = u''.join(c for c in unicodedata.normalize('NFKD', s)
+                     if not unicodedata.combining(c))
+    except Exception:
+        pass
+    s = re.sub(r'[^a-z0-9+ ]+', ' ', s)
+    return re.sub(r'\s+', ' ', s).strip()
+
+
+def _club_key(team_norm):
+    """normalise un nom d'équipe vers une clé FOOTAO_CLUBS (alias inclus)."""
+    t = _FTAO_ALIAS.get(team_norm, team_norm)
+    return t
+
+
+def teams_from_title(title):
+    """['⚽ France - Ligue 1 : Paris FC 🇫🇷 vs PSG 🇫🇷'] -> ['Paris FC', 'PSG'].
+
+    Renvoie [] pour les événements sans affrontement (finales WTA, GP…).
+    """
+    t = _unescape(title or u'')
+    if u'vs' not in t.lower():
+        return []
+    m = re.search(r':\s*(.+)$', t, re.DOTALL)  # saute « Championnat : »
+    if m:
+        t = m.group(1)
+    parts = re.split(r'\s+vs\.?\s+', t, flags=re.IGNORECASE)
+    if len(parts) != 2:
+        return []
+    out = []
+    for p in parts:
+        p = re.sub(r'[^\w\s\'’-]+', ' ', p, flags=re.UNICODE)  # drapeaux/emoji
+        p = _FTAO_SUFFIX_RE.sub(u'', p.strip())
+        if p:
+            out.append(p)
+    return out if len(out) == 2 else []
+
+
+def parse_footao_page(html, today=None):
+    """Page club footao -> [{'dt': 'YYYY-MM-DD', 'time': 'HH:MM',
+    'teams': [A, B], 'chans': ['Canal+ Foot', …]}]."""
+    out = []
+    seen = set()
+
+    def add(dt, hhmm, blob):
+        rc = _FTAO_RC_RE.search(blob)
+        if not rc:
+            return
+        name = re.sub(r'<[^>]+>', '', rc.group(1))
+        name = _unescape(name).strip()
+        name = _FTAO_SUFFIX_RE.sub(u'', name).strip()
+        if not name:
+            return
+        teams = [x.strip() for x in _FTAO_TEAM_SEP_RE.split(name) if x.strip()]
+        if len(teams) < 2:
+            return
+        chans = [_unescape(c[1]).strip() for c in _FTAO_CHAN_RE.findall(blob)]
+        chans = [c for c in chans if c]
+        key = (dt or '', hhmm or '', _norm_team(u'|'.join(teams)))
+        if key in seen:
+            return
+        seen.add(key)
+        out.append({'dt': dt or '', 'time': hhmm or '',
+                    'teams': teams[:2], 'chans': chans})
+
+    for m in _FTAO_RICH_RE.finditer(html):
+        blob = m.group(1)
+        dm = _FTAO_DT_RE.search(blob)
+        tm = re.search(r'<time[^>]*>(\d{2}:\d{2})</time>', blob)
+        add(dm.group(1) if dm else u'',
+            (dm.group(2) if dm else (tm.group(1) if tm else u'')), blob)
+    for m in _FTAO_SIMPLE_RE.finditer(html):
+        add(today or u'', m.group(1), m.group(2))
+    return out
+
+
+def _footao_fetch(eq):
+    """Page club (suivant la redirection JS) -> HTML, avec cache 1 h."""
+    now = time.time()
+    hit = _ftao_cache.get(eq)
+    if hit and now - hit[0] < FOOTAO_TTL:
+        return hit[1]
+    try:
+        from urllib.parse import quote as _q
+    except ImportError:
+        from urllib import quote as _q
+    url = '%s/programmetv.php?eq=%s' % (FOOTAO_BASE, _q(eq, safe='%|&'))
+    txt, code = _get(url, referer=FOOTAO_BASE + '/', timeout=12)
+    if code == 200:
+        red = re.search(r'window\.location\.replace\("([^"]+)"\)', txt)
+        if red:
+            target = red.group(1)
+            if target.startswith('/'):
+                target = FOOTAO_BASE + target
+            txt, code = _get(target, referer=url, timeout=12)
+    if code != 200:
+        raise Exception('footao %s -> HTTP %s' % (eq, code))
+    _ftao_cache[eq] = (now, txt)
+    return txt
+
+
+def _footao_chan_lookup(name):
+    """'Canal+ Foot' -> ('Canal+ Foot France', 463) ; None si inconnu.
+
+    Repli préfixe uniquement quand le nom footao est PLUS précis que la
+    table (« beIN Sports 1 UHD » -> beIN 1) ; jamais l'inverse : un
+    « DAZN » générique ne doit pas devenir « DAZN Ligue 1 ».
+    """
+    n = _norm_team(name)
+    if n in FOOTAO_CHAN_ID:
+        return FOOTAO_CHAN_ID[n]
+    best = None
+    for key in FOOTAO_CHAN_ID:
+        if n.startswith(key + ' '):
+            if not best or len(key) > len(best[0]):
+                best = (key, FOOTAO_CHAN_ID[key])
+    return best[1] if best else None
+
+
+def enrich_servers(title, servers, today=None, fetch=None):
+    """Ajoute les diffuseurs FR footao manquants, libellés « (footao) ».
+
+    servers : [[nom, url_watch], …] de la grille DaddyLive. Pure sauf le
+    fetch réseau (injectable pour les tests). Tolérant aux pannes : en cas
+    de doute on renvoie `servers` inchangé.
+    """
+    teams = teams_from_title(title)
+    if len(teams) != 2 or not servers:
+        return servers
+    tnorms = [_club_key(_norm_team(t)) for t in teams]
+    # les DEUX équipes doivent exister chez footao : une seule correspondance
+    # risque d'apparier un match d'un autre sport (hand « Paris SG » -> foot PSG)
+    eq_list = []          # (eq, clé côté event)
+    k2eq = {}             # nom footao normalisé (eq ou club) -> clé event
+    for t in tnorms:
+        for cname, ceq in FOOTAO_CLUBS.items():
+            if _club_key(_norm_team(cname)) == t:
+                if all(e != ceq for e, _t in eq_list):
+                    eq_list.append((ceq, t))
+                k2eq[_norm_team(ceq)] = t
+                k2eq[_norm_team(cname)] = t
+    if len(eq_list) != 2:
+        return servers
+    today = today or time.strftime('%Y-%m-%d')
+    matches = []
+    for eq, _t in eq_list:
+        try:
+            html = (fetch or _footao_fetch)(eq)
+        except Exception:
+            continue
+        matches.extend(parse_footao_page(html, today=today))
+    if not matches:
+        return servers
+
+    def canon(team_key):
+        """nom footao -> clé côté event (« Paris PSG » -> « psg »)."""
+        return k2eq.get(team_key, team_key)
+
+    def score(m):
+        mts = set(canon(_club_key(_norm_team(t))) for t in m['teams'])
+        inter = len(mts.intersection(tnorms))
+        # départage : même jour que la grille > futur > passé
+        if m['dt'] == today:
+            dist = 0
+        elif m['dt'] and m['dt'] > today:
+            dist = 1
+        else:
+            dist = 2
+        return (inter, -dist)
+
+    best = max(matches, key=score)
+    if score(best)[0] < 2:   # les deux équipes du match footao doivent matcher
+        return servers
+
+    domain = DOMAINS[0]
+    for _n, u in servers:
+        mu = re.search(r'watch\.php\?id=', u or '')
+        if u and mu:
+            p = u.split('//', 1)
+            if len(p) > 1:
+                domain = 'https://' + p[1].split('/', 1)[0]
+            break
+    have_names = set(_norm_team(n) for n, _u in servers)
+    have_ids = set()
+    for _n, u in servers:
+        mi = _ID_RE.search(u or '')
+        if mi:
+            have_ids.add(int(mi.group(1)))
+    out = list(servers)
+    for cname in best['chans']:
+        hit = _footao_chan_lookup(cname)
+        if not hit:
+            continue
+        dl_name, cid = hit
+        if cid in have_ids or _norm_team(dl_name) in have_names:
+            continue
+        have_ids.add(cid)
+        out.append([u'%s (footao)' % dl_name,
+                    u'%s/watch.php?id=%d' % (domain, cid)])
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Resolution
 # ---------------------------------------------------------------------------
 
@@ -354,11 +731,14 @@ def _absolutise(src, base):
     return src
 
 
-def resolve(server_url):
+def resolve(server_url, prefer_fallback=False):
     """watch.php?id=N -> playable m3u8 (+ player page URL for Referer).
 
     Returns (m3u8_url, player_page_url) so the shared site_play() binds
     Referer/Origin to the player host -- what these CDNs check.
+    prefer_fallback=True (v3.6.2 « lien (repli) ») saute la voie principale
+    _econfig et passe directement par playlist-token puis la regex m3u8 :
+    si l'un des deux résolveurs casse, l'autre reste disponible.
     """
     m = _ID_RE.search(server_url or '')
     if not m:
@@ -404,15 +784,17 @@ def resolve(server_url):
                         '(réessaie dans quelques secondes)'
                         % (player_origin, code3))
 
-    # a) window._econfig (Plaza4756/dlhd-kodi layout)
-    try:
-        from resources.modules import econfig as _econfig
-        if _econfig.find_econfig(txt3):
-            fl, cfg = _econfig.extract_stream_from_html(txt3)
-            if fl:
-                return fl, player_url
-    except Exception:
-        pass
+    # a) window._econfig (Plaza4756/dlhd-kodi layout) — voie principale ;
+    #    sautée en mode repli pour tester d'abord playlist-token
+    if not prefer_fallback:
+        try:
+            from resources.modules import econfig as _econfig
+            if _econfig.find_econfig(txt3):
+                fl, cfg = _econfig.extract_stream_from_html(txt3)
+                if fl:
+                    return fl, player_url
+        except Exception:
+            pass
 
     # b) const SRC / CHANNEL / EDGE -> playlist-token (StepDaddyLiveHD layout)
     try:
@@ -486,3 +868,26 @@ if __name__ == '__main__':
     assert not is_fr_channel('Eurosport 1 Greece')
     assert not is_fr_channel('Canal 11 Portugal')
     print('OK')
+
+    # v3.6.2 — enrichissement footao (fixture page club PSG si présente)
+    import os
+    if os.path.exists('/tmp/ftao_psg3.html'):
+        fhtml = open('/tmp/ftao_psg3.html', encoding='utf-8',
+                     errors='replace').read()
+        fms = parse_footao_page(fhtml, today='2026-11-01')
+        assert fms, 'aucun match parsé sur la page footao'
+        assert any(u'Villarreal' in u' '.join(x['teams']) for x in fms)
+        out = enrich_servers(
+            u'⚽ UEFA Champions League : Villarreal vs PSG',
+            [[u'Canal+ France', u'https://thedaddy.pk/watch.php?id=121']],
+            today='2026-11-03', fetch=lambda eq: fhtml)
+        assert any(u'(footao)' in n for n, u in out), 'enrichissement raté'
+        # anti faux positif : le hand « Paris SG » ne doit pas matcher le foot
+        srv_hb = [[u'beIN Sports 1 France', u'https://thedaddy.pk/watch.php?id=116']]
+        assert enrich_servers(u'🤾 Starligue : Paris SG vs Montpellier',
+                              srv_hb, today='2026-11-01',
+                              fetch=lambda eq: fhtml) == srv_hb
+        assert teams_from_title(u'⚽ France - Ligue 1 : Paris FC vs PSG') == \
+            [u'Paris FC', u'PSG']
+        assert teams_from_title(u'🎾 ATP Basel Tournament Final') == []
+        print('footao enrich: OK (%d matchs page club)' % len(fms))

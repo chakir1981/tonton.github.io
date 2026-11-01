@@ -51,7 +51,8 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.6.1" provider-name="chakir1981">
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.6.2" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -68,6 +69,10 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
+      [B]v3.6.2[/B] 02/11/2026
+- Chaque match gagne des liens : enrichissement footao.tv — quand la grille DaddyLive ne liste qu'une chaîne française, le guide footao (chaînes réellement diffusées en France) ajoute le deuxième diffuseur (Canal+ Foot, Canal+, beIN, RMC, Ligue1+…), marqué « (footao) ». 150 clubs couverts (Ligue 1/2, PL, Liga, Serie A, Bundesliga, C1/C2, sélections), cache 1 h, panne silencieuse.
+- Deux liens par chaîne : chaque chaîne d'un match propose « Chaîne » (résolution _econfig) et « Chaîne (repli) » (résolution playlist-token) — si un résolveur casse, l'autre reste jouable.
+- Filtrage français élargi aux chaînes 6ter, Arte, C8, LCI, BFM (ajoutées par footao).
       [B]v3.6.1[/B] 02/11/2026
 - Nouvelle rubrique « Matchs du jour (FR) » : le planning DaddyLive du jour (thedaddy.pk) filtré sur les vraies chaînes françaises — beIN Sports 1/2/3 + MAX France, Canal+, Canal+ Sport/Foot/F1/MotoGP, RMC Sport, Ligue1+ (DAZN), Eurosport France, L'Équipe, Sport en France… soit ~45 matchs FR par jour, horaires convertis, statut en direct, chaînes miroirs en secours.
 - Nouvelle rubrique « Chaînes FR (24/7) » : ~40 chaînes françaises disponibles en continu (toutes les beIN/Canal+/RMC/DAZN Ligue1+/Eurosport France + TF1, M6, France 2-5, TMC, C8 pour les grands événements).
