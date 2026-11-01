@@ -921,6 +921,14 @@ def fallback_channels(label, limit=6, epg_wait=EPG_WAIT_S):
     return out
 
 
+def resolve_channel(url):
+    """Résolution directe d'une URL de chaîne Vavoo (m3u8 de session ou
+    None). Exposé pour la DOUBLE PORTE des liens LiveWatch (v2.1.5) :
+    la même chaîne est résolue en parallèle par la porte Vavoo (~0,4 s)
+    et par la porte LiveWatch, la première qui répond gagne."""
+    return _resolve(url)
+
+
 # ---- auth signature ---------------------------------------------------------
 
 def _build_payload(reason='app-focus'):

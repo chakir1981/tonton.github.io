@@ -1398,13 +1398,16 @@ def _add_livewatch_links(title, poster=ICON):
     """Ajoute 3 liens « Lien 1 / 2 / 3 » via LiveWatch pour un match
     sans source française.
 
-    Ce sont les chaînes françaises correspondant au match (celles que le
-    moteur Vavoo aurait choisies : LIGUE1+, CANAL+ FOOT, DAZN LIGUE 1
-    LIVE...) servies par la porte livewatch.icu. Chaque lien porte la
-    résolution annoncée par le site (4K/FHD/HD) quand elle existe, et le
-    moteur de sélection essaie de donner 3 RÉSOLUTIONS DIFFÉRENTES.
-    Les liens sont pré-résolus en arrière-plan dès l'affichage (un seul
-    ticket pour les trois) : au clic, ouverture quasi instantanée.
+    Ce sont les chaînes françaises correspondant au match, trouvées par
+    DOUBLE CHASSE : le moteur Vavoo (grille TV + heuristique, pool
+    élargi à 8) PUIS la recherche directe dans le groupe France de
+    LiveWatch (~930 chaînes, plus large) qui attrape des chaînes que le
+    moteur ne voit pas. Chaque lien porte la résolution annoncée par le
+    site (4K/FHD/HD) quand elle existe et les URLs Vavoo de la même
+    chaîne pour la DOUBLE PORTE au clic (résolution parallèle Vavoo +
+    LiveWatch, la première qui répond gagne — ouverture aussi rapide
+    qu'une chaîne française native). Les liens sont pré-résolus en
+    arrière-plan dès l'affichage (un seul ticket pour les trois).
     Rien n'est ajouté si le catalogue LiveWatch n'est pas encore prêt
     (jamais d'attente à l'affichage ; il le sera au prochain menu).
     """
@@ -1412,7 +1415,17 @@ def _add_livewatch_links(title, poster=ICON):
         if not site_livewatch.is_warm():
             site_livewatch.warmup()
             return 0
-        chans = site_vavoo.fallback_channels(title)
+        chans = site_vavoo.fallback_channels(title, limit=8)
+        try:
+            lw_only = site_livewatch.search_french(title, limit=8)
+        except Exception as exc:
+            log_info('livewatch search_french failed: {0!r}'.format(exc))
+            lw_only = []
+        if lw_only:
+            have = set(site_vavoo._norm(c['title']) for c in chans)
+            chans = list(chans) + [c for c in lw_only
+                                   if site_vavoo._norm(c['title'])
+                                   not in have]
     except Exception as exc:
         log_info('livewatch backup failed: {0!r}'.format(exc))
         return 0
@@ -1431,6 +1444,7 @@ def _add_livewatch_links(title, poster=ICON):
                                   'alt': [u'lw://{0}'.format(i)
                                           for i in ch['ids']
                                           if i != ch['id']],
+                                  'vav': ch.get('vav') or [],
                                   't': title, 'p': poster})
             qual = ch.get('quality') or ''
             res = _QUAL_RES.get(qual)
@@ -1442,10 +1456,12 @@ def _add_livewatch_links(title, poster=ICON):
                 qtxt = u'Qualité non annoncée par le site.'
             info = {'title': u'{0} | Lien {1} — {2} (LiveWatch)'.format(
                         title, added + 1, ch['title']),
-                    'plot': u'{0} — {1} via LiveWatch : 2e porte du même '
-                            u'gisement que Vavoo, plus lente à démarrer '
-                            u'(~3 s). À essayer si un serveur Vavoo '
-                            u'échoue. {2}'.format(title, ch['title'], qtxt)}
+                    'plot': u'{0} — {1} via la double porte Vavoo + '
+                            u'LiveWatch : les deux résolutions partent en '
+                            u'parallèle au clic, la première qui répond '
+                            u'gagne — ouverture aussi rapide qu\'une '
+                            u'chaîne française native. {2}'.format(
+                                title, ch['title'], qtxt)}
             label = u'[B]Lien {0}[/B]'.format(added + 1)
             if ch['title']:
                 label += u' · {0}'.format(ch['title'])
@@ -1516,6 +1532,64 @@ def site_streams_menu(payload):
     xbmcplugin.endOfDirectory(_handle)
 
 
+def _resolve_dual_door(d):
+    """DOUBLE PORTE pour un lien LiveWatch : la MÊME chaîne est résolue
+    en parallèle par la porte Vavoo (rapide : ~0,4 s) et par la porte
+    LiveWatch (pré-résolue au menu -> ~0,1 s). La première qui répond
+    gagne ; l'autre n'est jamais attendue inutilement.
+
+    Retour (resultat, site, referer_url_ou_None) :
+      - porte LiveWatch : resultat = (m3u8, page) — site_play en tire
+        l'origine livewatch.icu (en-têtes côté CDN) ;
+      - porte Vavoo : resultat = m3u8, referer_url = l'URL Vavoo (pour
+        l'origine + le User-Agent MediaHubMX/2, comme un flux natif).
+      - (None, None, None) si les deux portes échouent.
+    """
+    res = {}
+
+    def _lw(u):
+        try:
+            res['lw'] = site_livewatch.resolve(u)
+        except Exception as exc:
+            log_info('double porte lw {0}: {1!r}'.format(u, exc))
+
+    def _vav(u):
+        try:
+            m = site_vavoo.resolve_channel(u)
+            if m:
+                res['vav'] = m
+                res['vav_url'] = u
+        except Exception as exc:
+            log_info('double porte vav {0}: {1!r}'.format(u, exc))
+
+    ths = [threading.Thread(target=_lw, args=(d.get('u') or '',))]
+    for u in (d.get('vav') or [])[:2]:
+        ths.append(threading.Thread(target=_vav, args=(u,)))
+    for t in ths:
+        t.daemon = True
+        t.start()
+    # premier succès gagne : LiveWatch pré-résolu -> instantané, sinon
+    # la porte Vavoo répond en général en ~0,4 s
+    deadline = time.time() + 16.0
+    while time.time() < deadline:
+        if 'lw' in res or 'vav' in res:
+            break
+        if not any(t.is_alive() for t in ths):
+            break
+        time.sleep(0.1)
+    if 'lw' in res:
+        return res['lw'], site_livewatch, None
+    if 'vav' in res:
+        return res['vav'], site_vavoo, res.get('vav_url')
+    for t in ths:                # un dernier thread encore vivant : finir
+        t.join(timeout=8.0)
+    if 'lw' in res:
+        return res['lw'], site_livewatch, None
+    if 'vav' in res:
+        return res['vav'], site_vavoo, res.get('vav_url')
+    return None, None, None
+
+
 def site_play(payload):
     d = json.loads(payload)
     site = SITES[d['k']]
@@ -1526,14 +1600,46 @@ def site_play(payload):
     # dans l'ordre si la première ne résout pas.
     links = [d.get('u') or ''] + [u for u in (d.get('alt') or []) if u]
     result = None
-    for u in links:
-        try:
-            result = site.resolve(u)
-        except Exception as exc:
-            log_info('site resolve {0} failed: {1!r}'.format(u, exc))
-            result = None
-        if result:
-            break
+    play_site = site
+    vav_ref = None
+    if d['k'] == site_livewatch.KEY and (d.get('vav') or d.get('alt')):
+        # DOUBLE PORTE (v2.1.5) : LiveWatch (pré-résolu) + Vavoo partent
+        # en parallèle, la première qui répond gagne.
+        result, play_site, vav_ref = _resolve_dual_door(d)
+        if not result:
+            # portes principales KO : variantes LiveWatch restantes,
+            # puis URLs Vavoo restantes, comme avant
+            tried = set([d.get('u') or ''] + list(d.get('vav') or []))
+            for u in [x for x in (d.get('alt') or [])
+                      if x and x not in tried]:
+                try:
+                    result = site_livewatch.resolve(u)
+                    play_site = site_livewatch
+                except Exception as exc:
+                    log_info('site resolve {0} failed: {1!r}'.format(u, exc))
+                    result = None
+                if result:
+                    break
+            if not result:
+                for u in [x for x in (d.get('vav') or [])
+                          if x not in tried]:
+                    try:
+                        m = site_vavoo.resolve_channel(u)
+                    except Exception as exc:
+                        log_info('site resolve {0} failed: {1!r}'.format(u, exc))
+                        m = None
+                    if m:
+                        result, play_site, vav_ref = m, site_vavoo, u
+                        break
+    else:
+        for u in links:
+            try:
+                result = site.resolve(u)
+            except Exception as exc:
+                log_info('site resolve {0} failed: {1!r}'.format(u, exc))
+                result = None
+            if result:
+                break
     if not result:
         raise Exception('could not resolve stream for ' + d['u'])
     # resolve() normally returns just the m3u8 string; sites that chain
@@ -1541,9 +1647,11 @@ def site_play(payload):
     # wrapper) return (m3u8, final_page_url) since the CDN token's own
     # host, not the originally-clicked link, is what the player needs
     # for Referer/Origin.
-    flink, referer_url = result if isinstance(result, tuple) else (result, d['u'])
+    flink, referer_url = result if isinstance(result, tuple) else \
+        (result, vav_ref or d['u'])
     origin = '{uri.scheme}://{uri.netloc}'.format(uri=urlparse(referer_url))
-    stream_headers = {'Referer': origin + '/', 'Origin': origin, 'User-Agent': site.UA}
+    stream_headers = {'Referer': origin + '/', 'Origin': origin,
+                      'User-Agent': play_site.UA}
     # installed inputstream.ffmpegdirect (21.3.8) does not whitelist a
     # stream_headers listitem property -- its addon.xml listitemprops=
     # "...default_url|is_realtime_stream|..." has no headers entry, so

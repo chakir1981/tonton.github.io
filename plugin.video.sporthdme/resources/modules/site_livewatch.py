@@ -13,17 +13,28 @@ L'EQUIPE...) mais avec son propre proxy HLS et sa propre authentification :
     GET  <MAIN><proxy_url>            -> playlist m3u8   (Referer + UA)
 
 Rôle dans l'add-on : quand un match n'a AUCUNE source française, 3 liens
-« Lien 1/2/3 » utilisant les chaînes françaises correspondantes (mêmes
-chaînes que le moteur Vavoo) sont proposés via cette porte ; les matchs
-déjà servis en français ne sont pas modifiés. Le champ « quality » du
-catalogue (4K/FHD/HD/'') est remonté pour afficher la résolution de
-chaque lien et en proposer si possible trois différentes (backup_links).
-Ouverture rapide : dès l'affichage du menu, les 3 liens sont pré-résolus
-en arrière-plan avec UN ticket/grant partagé (prewarm) — au clic le lien
-part du cache (~0,1 s) ; sinon la chaîne complète ne coûte que ~4 s
-(le serveur exige un ticket âgé d'environ 2 s au moment du grant :
-pause calée à 1,2 s). Le catalogue est préchauffé en arrière-plan et
-mis en cache (mémoire + disque).
+« Lien 1/2/3 » utilisant les chaînes françaises correspondantes sont
+proposés via cette porte ; les matchs déjà servis en français ne sont
+pas modifiés. Le champ « quality » du catalogue (4K/FHD/HD/'') est
+remonté pour afficher la résolution de chaque lien et en proposer si
+possible trois différentes (backup_links).
+
+Ouverture rapide (v2.1.5) :
+  - dès l'affichage du menu, les 3 liens sont pré-résolus en
+    arrière-plan avec UN ticket/grant partagé (prewarm) — au clic le
+    lien part du cache (~0,1 s) ;
+  - les flux pré-résolus sont aussi écrits sur disque : ils survivent à
+    un redémarrage de Kodi pendant leur durée de vie (~100 s) ;
+  - un ticket/grant est pré-acquis au préchauffage (warmup) et un grant
+    récent est réutilisé (~1 min) : la pause obligatoire ticket->grant
+    n'est payée qu'une fois par minute au lieu de chaque lot ;
+  - DOUBLE PORTE au clic : la même chaîne est résolue en parallèle par
+    Vavoo (~0,4 s, resolve_channel) et par LiveWatch — la première qui
+    répond gagne, ouverture égale aux chaînes françaises natives ;
+  - CHASSE DIRECTE : search_french() fouille le groupe France de
+    LiveWatch (~930 chaînes, plus large que le catalogue scanné côté
+    Vavoo) avec les règles sport/compétition du moteur Vavoo ; les
+    liens portent aussi les URLs Vavoo de la même chaîne ('vav').
 
 Contrat site_play : resolve('lw://<id>') renvoie (m3u8, page_referer)
 pour que les en-têtes pointent vers livewatch.icu.
@@ -50,6 +61,9 @@ GRANT_SLEEP = 1.2                 # le serveur refuse un grant demandé pour un
                                   # pause + réseau = ~2,5 s d'âge, accepté
 PREWARM_TTL = 100.0               # proxy_url encore vivante à +2 min (mesuré)
                                   # -> cache court avec marge
+GRANT_REUSE_TTL = 60.0            # un grant sert pour plusieurs chaînes et
+                                  # reste bon ~1 min (proxy_url vivante à
+                                  # +2 min, mesuré) : réutilisé en ce cadre
 
 _catalog = {'ts': 0.0, 'data': None}
 _lock = threading.Lock()
@@ -57,6 +71,8 @@ _warm_thread = [None]
 _prewarm = {}                     # id -> {'ts': float, 'play': url proxy}
 _prewarm_th = {}                  # id -> thread de préchauffage en cours
 _prewarm_lock = threading.Lock()
+_prewarm_disk_loaded = [False]    # cache disque des flux rechargé 1 fois/processus
+_grant_cache = {'ts': 0.0, 'grant': None}   # dernier ticket/grant en date
 _dead = {}                        # id -> ts : lien hors service (détection
                                   # au préchauffage), ignoré ~5 min
 DEAD_TTL = 300.0
@@ -121,12 +137,17 @@ def _disk_save(data):
 
 
 def clear_cache():
-    """Vide le cache catalogue LiveWatch (mémoire + disque)."""
+    """Vide les caches LiveWatch (catalogue + flux pré-résolus)."""
     global _catalog
     _catalog = {'ts': 0.0, 'data': None}
+    with _prewarm_lock:
+        _prewarm.clear()
+    _grant_cache['ts'] = 0.0
+    _grant_cache['grant'] = None
     try:
         import os
         os.remove(_cache_path())
+        os.remove(_prewarm_disk_path())
         return True
     except Exception:
         return False
@@ -187,6 +208,67 @@ def _index():
     return idx
 
 
+# ---- cache disque des flux pré-résolus ---------------------------------------
+
+def _prewarm_disk_path():
+    import os
+    try:
+        import xbmcaddon
+        import xbmcvfs
+        profile = xbmcaddon.Addon().getAddonInfo('profile')
+        try:
+            return os.path.join(xbmcvfs.translatePath(profile),
+                                'lw_prewarm.json')
+        except AttributeError:  # Kodi 18
+            import xbmc
+            return os.path.join(xbmc.translatePath(profile),
+                                'lw_prewarm.json')
+    except Exception:
+        import tempfile
+        return os.path.join(tempfile.gettempdir(), 'sporthd_lw_prewarm.json')
+
+
+def _prewarm_disk_load():
+    """Recharge les flux pré-résolus encore frais (une fois par
+    processus) : un redémarrage de Kodi entre le menu et le clic ne
+    perd plus la pré-résolution."""
+    if _prewarm_disk_loaded[0]:
+        return
+    _prewarm_disk_loaded[0] = True
+    try:
+        import os
+        path = _prewarm_disk_path()
+        if time.time() - os.path.getmtime(path) >= PREWARM_TTL:
+            return
+        with open(path) as f:
+            blob = json.load(f) or {}
+        now = time.time()
+        with _prewarm_lock:
+            for k, v in (blob.get('e') or {}).items():
+                try:
+                    if v and now - float(v.get('ts') or 0) < PREWARM_TTL \
+                            and v.get('play'):
+                        _prewarm.setdefault(k, v)
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+
+def _prewarm_disk_save():
+    try:
+        import os
+        now = time.time()
+        with _prewarm_lock:
+            fresh = dict((k, v) for k, v in _prewarm.items()
+                         if now - float(v.get('ts') or 0) < PREWARM_TTL)
+        path = _prewarm_disk_path()
+        with open(path, 'w') as f:
+            json.dump({'t': now, 'e': fresh}, f)
+    except Exception:
+        pass
+
+
 # ---- rapprochement des noms (moteur Vavoo -> LiveWatch) ---------------------
 
 _QUAL_TOKENS = ('FHD', 'HD', 'UHD', 'SD', '4K')
@@ -230,13 +312,54 @@ def lookup(title, idx=None):
     return None
 
 
+def search_french(label, limit=8):
+    """Chaînes France de LiveWatch correspondant au match, SANS passer
+    par le catalogue Vavoo : le groupe France de LiveWatch est plus
+    large (~930 chaînes) que le catalogue scanné côté Vavoo, certains
+    beIN/Canal+/RMC numérotés n'y sont visibles que là.
+
+    Utilise les MÊMES règles sport/compétition que le moteur Vavoo
+    (_fallback_patterns). Retour : liste [{'title', ...}] au format
+    attendu par backup_links (lookup() les retrouve à l'identique,
+    sans URL Vavoo), [] si rien ne correspond."""
+    if not label:
+        return []
+    from resources.modules import site_vavoo
+    idx = _index()
+    if not idx:
+        return []
+    out, used = [], set()
+    for pat in site_vavoo._fallback_patterns(label):
+        pt = _norm(pat).split()
+        if not pt:
+            continue
+        best = None
+        for n, lst in idx.items():
+            if n in used:
+                continue
+            tt = n.split()
+            if len(pt) <= len(tt) and tt[:len(pt)] == pt:
+                # préférer le nom le plus proche du motif, puis le plus
+                # de variantes qualité disponibles
+                key = (abs(len(tt) - len(pt)), -len(lst))
+                if best is None or key < best[0]:
+                    best = (key, n)
+        if best is not None:
+            used.add(best[1])
+            out.append({'title': best[1]})
+            if len(out) >= limit:
+                break
+    return out
+
+
 def backup_links(vavoo_chans, limit=3):
     """Jusqu'à `limit` liens LiveWatch pour les chaînes Vavoo du match,
     à résolutions différentes quand le catalogue le permet.
 
-    vavoo_chans : liste {'title', ...} renvoyée par le moteur Vavoo
-    (fallback_channels). Retour : liste plate
-    [{'title', 'id', 'quality', 'vav_title', 'ids'}] dans l'ordre
+    vavoo_chans : liste {'title', 'urls', ...} renvoyée par le moteur
+    Vavoo (fallback_channels) et/ou par search_french (sans 'urls').
+    Retour : liste plate
+    [{'title', 'id', 'quality', 'vav_title', 'vav', 'ids'}] dans l'ordre
     d'affichage. Sélection en deux passes :
       1re passe : un lien par chaîne du moteur (ordre de préférence),
         en choisissant pour chacune une qualité PAS ENCORE PROPOSÉE
@@ -247,7 +370,10 @@ def backup_links(vavoo_chans, limit=3):
         atteindre `limit` liens même si tout est dans la même qualité.
     'ids' : toutes les variantes de la même chaîne — site_play les
     essaye dans l'ordre si le lien cliqué échoue.
-    """
+    'vav' : URLs de la même chaîne côté porte Vavoo (DOUBLE PORTE,
+    v2.1.5) — résolues en parallèle de LiveWatch au clic, la première
+    qui répond gagne ; absent quand la chaîne n'est pas dans le
+    catalogue Vavoo (trouvée par search_french uniquement)."""
     idx = _index()
     chans, used_names = [], set()
     for ch in vavoo_chans or []:
@@ -256,17 +382,18 @@ def backup_links(vavoo_chans, limit=3):
             continue
         used_names.add(hit['name'])
         chans.append((hit['name'], idx[_norm(hit['name'])],
-                      ch.get('title') or hit['name']))
+                      ch.get('title') or hit['name'],
+                      list((ch.get('urls') or [])[:2])))
 
-    def _entry(name, variants, vav, v):
+    def _entry(name, variants, vav, v, urls):
         return {'title': name, 'id': v['id'],
                 'quality': v.get('quality') or '',
-                'vav_title': vav,
+                'vav_title': vav, 'vav': urls,
                 'ids': [c['id'] for c in variants]}
 
     sel, used_q = [], set()
     # 1re passe : une chaîne par lien, qualité différente quand possible
-    for name, variants, vav in chans:
+    for name, variants, vav, urls in chans:
         if len(sel) >= limit:
             break
         pick = None
@@ -276,20 +403,20 @@ def backup_links(vavoo_chans, limit=3):
                 break
         if pick is None:
             pick = variants[0]
-        sel.append(_entry(name, variants, vav, pick))
+        sel.append(_entry(name, variants, vav, pick, urls))
         used_q.add(sel[-1]['quality'])
     # 2e passe : variantes supplémentaires des mêmes chaînes (autres
     # résolutions, meilleures d'abord) pour atteindre `limit` liens
     if len(sel) < limit:
         chosen = set(e['id'] for e in sel)
-        for name, variants, vav in chans:
+        for name, variants, vav, urls in chans:
             for v in variants:
                 if len(sel) >= limit:
                     break
                 if v['id'] in chosen:
                     continue
                 chosen.add(v['id'])
-                sel.append(_entry(name, variants, vav, v))
+                sel.append(_entry(name, variants, vav, v, urls))
             if len(sel) >= limit:
                 break
     return sel
@@ -314,7 +441,18 @@ def _ticket_grant(errs):
     grant = (r.json() or {}).get('grant')
     if not grant:
         errs.append('grant refusé')
+        return None
+    _grant_cache['ts'] = time.time()
+    _grant_cache['grant'] = grant
     return grant
+
+
+def _cached_grant():
+    """Grant récent encore réutilisable (~1 min), None sinon."""
+    g = _grant_cache.get('grant')
+    if g and time.time() - _grant_cache['ts'] < GRANT_REUSE_TTL:
+        return g
+    return None
 
 
 def _stream_of(mid, grant, errs):
@@ -339,10 +477,12 @@ def _stream_of(mid, grant, errs):
 def _cache_store(mid, play):
     with _prewarm_lock:
         _prewarm[mid] = {'ts': time.time(), 'play': play}
+    _prewarm_disk_save()
 
 
 def prewarmed(mid):
     """URL proxy déjà résolue (et encore fraîche) pour ce canal, None sinon."""
+    _prewarm_disk_load()
     with _prewarm_lock:
         e = _prewarm.get(mid)
     if e and time.time() - e['ts'] < PREWARM_TTL:
@@ -398,16 +538,22 @@ def resolve(server_url):
 def _prewarm_run(mids, idmap):
     """UN ticket/grant partagé, puis les canaux résolus en parallèle
     (mesuré : le serveur accepte un même grant pour plusieurs chaînes).
-    Variante choisie hors service -> les autres variantes de la même
-    chaîne sont essayées ; tout est mort -> marqué (DEAD_TTL)."""
-    grant = None
-    for _ in range(2):                # refus transient possible : nouvel essai
-        try:
-            grant = _ticket_grant([])
-        except Exception:
-            grant = None
-        if grant:
-            break
+    Un grant récent (moins d'une minute) est réutilisé tel quel : la
+    pause obligatoire ticket->grant n'est pas payée à nouveau ; si le
+    serveur le refuse, une chaîne complète à ticket frais est tentée
+    avant de conclure au lien mort. Variante choisie hors service ->
+    les autres variantes de la même chaîne sont essayées ; tout est
+    mort -> marqué (DEAD_TTL)."""
+    grant = _cached_grant()
+    fresh = grant is None
+    if fresh:
+        for _ in range(2):            # refus transient possible : nouvel essai
+            try:
+                grant = _ticket_grant([])
+            except Exception:
+                grant = None
+            if grant:
+                break
     if not grant:
         with _prewarm_lock:
             for mid in mids:
@@ -428,6 +574,24 @@ def _prewarm_run(mids, idmap):
                     return
                 with _prewarm_lock:
                     _dead[c] = time.time()
+            if not fresh:
+                # le grant réutilisé avait pu expirer côté serveur :
+                # chaîne complète à ticket frais avant de conclure
+                try:
+                    grant2 = _ticket_grant([])
+                except Exception:
+                    grant2 = None
+                if grant2:
+                    for c in cands[:4]:
+                        try:
+                            play = _stream_of(c, grant2, [])
+                        except Exception:
+                            play = None
+                        if play:
+                            _cache_store(mid, play)
+                            with _prewarm_lock:
+                                _dead.pop(c, None)
+                            return
         finally:
             with _prewarm_lock:
                 _prewarm_th.pop(mid, None)
@@ -500,6 +664,13 @@ def warmup():
             channels()
         except Exception:
             pass
+        # ticket/grant pré-acquis en arrière-plan : le premier lot de
+        # pré-résolution n'aura plus à payer la pause obligatoire
+        # ticket->grant (~1,2 s + réseau) à l'affichage du menu
+        try:
+            _ticket_grant([])
+        except Exception:
+            pass
 
     try:
         th = threading.Thread(target=_run)
@@ -539,5 +710,12 @@ if __name__ == '__main__':
                    {'title': u'DAZN LIGUE 1 LIVE 1'}]):
         print('      pour %s' % u', '.join(c['title'] for c in chans))
         for i, b in enumerate(backup_links(chans, limit=3), 1):
-            print('         Lien %d -> %s [%s]' % (
-                i, b['title'], b['quality'] or 'qualité non annoncée'))
+            print('         Lien %d -> %s [%s] vav=%d' % (
+                i, b['title'], b['quality'] or 'qualité non annoncée',
+                len(b.get('vav') or [])))
+    print('   chasse directe (search_french) :')
+    for lbl in (u'Lille - Lens Ligue 1',
+                u'Real Madrid - Barcelone LaLiga'):
+        hits = search_french(lbl, limit=5)
+        print('      %-36s -> %s' % (
+            lbl, u', '.join(h['title'] for h in hits) or '(aucun)'))
