@@ -8,7 +8,6 @@ import six
 from six.moves.urllib.parse import urljoin, quote_plus, quote, unquote, parse_qsl, urlencode, urlparse
 from datetime import datetime, timedelta
 import json
-import threading
 import xbmc
 import xbmcaddon
 import xbmcgui
@@ -18,8 +17,10 @@ from resources.modules import control, client
 from resources.modules import site_embedlivesports
 from resources.modules import site_futbollibre
 from resources.modules import site_futbolmov
-from resources.modules import site_vavoo
-from resources.modules import site_livewatch
+try:
+    from resources.modules import epg as epg_mod
+except ImportError:
+    epg_mod = None
 import time
 from dateutil.parser import parse
 from dateutil.tz import gettz
@@ -31,17 +32,8 @@ from dateutil import parser, tz
 # ÉVÉNEMENTS EN DIRECT and Événements en direct (see Live_fallback_url).
 EXTRA_SITES = [site_embedlivesports, site_futbollibre]
 SITES = {s.KEY: s for s in EXTRA_SITES}
-# LiveWatch n'est pas une rubrique du menu : c'est la porte de secours
-# pour les matchs SANS AUCUNE source française (3 liens « Lien 1/2/3 »
-# à résolutions différentes quand le site l'annonce, pré-résolus en
-# arrière-plan pour s'ouvrir vite). Les chaînes françaises utilisées
-# sont les mêmes que celles du moteur Vavoo. Registré ici uniquement
-# pour que site_play puisse appeler son resolve().
-SITES[site_livewatch.KEY] = site_livewatch
 # futbol-libre.mov: one main-menu entry -> its three lists (fmov_menu)
 SITES.update((s.KEY, s) for s in site_futbolmov.SUBSITES)
-# Vavoo French channels: one main-menu entry -> its two lists (vavoo_menu)
-SITES.update((s.KEY, s) for s in site_vavoo.SUBSITES)
 
 _url = sys.argv[0]
 _handle = int(sys.argv[1])
@@ -62,12 +54,6 @@ ART = ADDON_PATH + "/resources/icons/"
 
 BASEURL = 'https://one.sporthd.me/'  # 'https://sporthd.live/'  #'https://sportl.ivesoccer.sx/'
 Live_url = 'https://league.st'  # super.league.st died Sep 2026; bare league.st is back
-
-# Agendas « rapides » (Futbol Libre + Futbol Libre Mov) : les mêmes liens
-# que leurs menus, préchargés en arrière-plan et croisés avec les matchs
-# sans source française — proposés AVANT les chaînes Vavoo (plus rapides).
-AGENDA_TTL = 10 * 60.0
-_agenda_cache = {'ts': 0.0, 'events': [], 'thread': None}
 Live_fallback_url = 'https://tvsport.guide/proxy.php?source=index'  # same matches schema, JSON
 Alt_url = 'https://liveon.sx/program'  # 'https://1.livesoccer.sx/program'
 headers = {'User-Agent': client.agent(),
@@ -116,9 +102,12 @@ def Main_menu():
     addDir('[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(site_futbolmov.NAME),
            'fmov', 'fmov_menu', ICON, FANART, True,
            infoLabels={'title': site_futbolmov.NAME, 'plot': site_futbolmov.DESC})
-    addDir('[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(site_vavoo.NAME),
-           'vavoo', 'vavoo_menu', ICON, FANART, True,
-           infoLabels={'title': site_vavoo.NAME, 'plot': site_vavoo.DESC})
+    if epg_mod is not None:
+        addDir(u'[B][COLOR gold]GRILLE TV SPORT (FR)[/COLOR][/B]', 'epg', 'epg', ICON, FANART, True,
+               infoLabels={'title': u'Grille TV Sport (France)',
+                           'plot': u'Programmes en cours et à venir sur les chaînes sport françaises '
+                                   u'(beIN, Canal+, RMC Sport, Ligue 1+, DAZN, Eurosport, TNT). '
+                                   u'Source : XMLTV FR (xmltvfr.fr), grille quotidienne sur ~9 jours.'})
     # addDir('[B][COLOR gold]Alternative VIEW [/COLOR][/B]', '', '', ICON, FANART, '')
     # addDir('[B][COLOR gold]Alternative LIVE EVENTS[/COLOR][/B]', Alt_url, 15, ICON, FANART, '')
     # addDir('[B][COLOR white]SPORTS[/COLOR][/B]', '', 3, ICON, FANART, '')
@@ -147,16 +136,6 @@ def _matches_from_page(url):
 
 
 def get_events(url):  # 5
-    # préchauffage Vavoo (catalogue + grille TV en arrière-plan) et des
-    # agendas rapides : pendant que l'utilisateur parcourt les matchs, les
-    # caches se remplissent et les sources de dépannage d'un match sans
-    # source française s'afficheront sans attente au clic.
-    try:
-        site_vavoo.warmup()
-        site_livewatch.warmup()
-        _agenda_warm()
-    except Exception:
-        pass
     matches = None
     if url != Live_fallback_url:
         try:
@@ -189,14 +168,10 @@ def get_events(url):  # 5
     else:
         now_time_in_ms = datetime.now().timestamp() * 1000
     fr_only = _french_only()
-    vavoo_fb = _vavoo_fallback()
     filtered_out = 0
     for match in matches:
         channels = match.get("channels", [])
-        # match sans chaîne française : masqué, sauf si le rattachement
-        # Vavoo est actif (il recevra des chaînes Vavoo de dépannage)
-        no_fr = fr_only and not _channels_have_french(channels)
-        if no_fr and not vavoo_fb:
+        if fr_only and not _channels_have_french(channels):
             filtered_out += 1
             continue
         # links = match['additionalLinks']
@@ -234,8 +209,6 @@ def get_events(url):  # 5
         m_color = "lime" if is_live else "gold"
         ftime = u'[COLOR cyan]{}[/COLOR]'.format(ftime)
         name = u'{0} [COLOR {1}]{2}[/COLOR] - [I]{3}[/I]'.format(ftime, m_color, event, lname)
-        if no_fr:  # conservé grâce au rattachement Vavoo -> balise visible
-            name += u' [COLOR gold][Vavoo][/COLOR]'
         event_list.append([name, compare, channels, icon])
 
         # streams = str(quote(base64.b64encode(six.ensure_binary(str(streams)))))
@@ -341,214 +314,6 @@ def _servers_have_french(servers):
     return False
 
 
-def _vavoo_fallback():
-    """Réglage « Rattacher les chaînes Vavoo aux matchs sans source
-    française » (activé par défaut) : ces matchs restent affichés, avec
-    une balise [Vavoo], et leur menu de sources propose des chaînes
-    Vavoo françaises de dépannage."""
-    try:
-        return (ADDON.getSetting('vavoo_fallback') or 'true').lower() == 'true'
-    except Exception:
-        return True
-
-
-def _clean_label(label):
-    """Retire les codes couleur/balises Kodi d'un libellé de match."""
-    return re.sub(r'\[/?(?:COLOR[^\]]*|B|I)\]', u'', six.ensure_text(
-        label or u'', encoding='utf-8', errors='replace')).strip()
-
-
-def _fast_agendas():
-    """Agenda consolidé fllibre + fmov (cache mémoire AGENDA_TTL)."""
-    now = time.time()
-    if _agenda_cache['events'] and now - _agenda_cache['ts'] < AGENDA_TTL:
-        return _agenda_cache['events']
-    events = []
-    for site in [site_futbollibre] + list(site_futbolmov.SUBSITES):
-        try:
-            for e in site.list_events():
-                e['_k'] = site.KEY
-                events.append(e)
-        except Exception as exc:
-            log_info('agenda {0} failed: {1!r}'.format(site.KEY, exc))
-    if events:
-        _agenda_cache['ts'] = now
-        _agenda_cache['events'] = events
-    return _agenda_cache['events']
-
-
-def _agenda_warm():
-    """Précharge les agendas rapides en arrière-plan (une fois à la fois)."""
-    try:
-        t = _agenda_cache['thread']
-        if t is not None and t.is_alive():
-            return
-    except Exception:
-        return
-
-    def _run():
-        try:
-            _fast_agendas()
-        except Exception:
-            pass
-
-    try:
-        th = threading.Thread(target=_run)
-        th.daemon = True
-        _agenda_cache['thread'] = th
-        th.start()
-    except Exception:
-        pass
-
-
-def _agenda_ready():
-    """True si les agendas rapides sont déjà en cache mémoire."""
-    try:
-        return bool(_agenda_cache['events']) \
-            and time.time() - _agenda_cache['ts'] < AGENDA_TTL
-    except Exception:
-        return False
-
-
-def _team_tokens(text):
-    """Mots significatifs d'un titre de match, pour le croisement.
-
-    Les accents sont repliés (ALAVÉS -> ALAVES, FRANÇAIS -> FRANCAIS)
-    pour que les titres espagnols/latins des agendas rapides rejoignent
-    les libellés anglais des événements.
-    """
-    try:
-        import unicodedata
-        txt = six.ensure_text(text or u'', encoding='utf-8',
-                              errors='replace').upper()
-        txt = unicodedata.normalize('NFKD', txt)
-        txt = u''.join(c for c in txt if not unicodedata.combining(c))
-    except Exception:
-        txt = six.ensure_text(text or u'', encoding='utf-8',
-                              errors='replace').upper()
-    txt = re.sub(r'[^A-Z0-9 ]', ' ', txt)
-    return set(w for w in txt.split()
-               if len(w) > 3 and w not in (u'VS', u'THE', u'LIVE',
-                                           u'STREAM', u'DIRECT', u'EN'))
-
-
-def _match_fast_events(title, limit=4):
-    """Événements des agendas rapides (fllibre/fmov) portant ce match.
-
-    Croisement par mots d'équipes : au moins 2 mots communs (ou l'unique
-    mot significatif). Le même match vu sur plusieurs sites ne garde que
-    la liste avec le plus de serveurs.
-    """
-    need = _team_tokens(title)
-    if not need:
-        return []
-    best = {}
-    for e in _fast_agendas():
-        shared = need & _team_tokens(e['title'])
-        if len(shared) < min(2, len(need)):
-            continue
-        key = e['title'].strip().lower()   # dédoublonnage inter-sites
-        cur = best.get(key)
-        if cur is None or len(e.get('servers') or []) > len(cur.get('servers') or []):
-            best[key] = e
-    out = sorted(best.values(),
-                 key=lambda e: -len(e.get('servers') or []))
-    return out[:limit]
-
-
-def _add_vavoo_fallback(match_label, poster=ICON):
-    """Propose les sources de dépannage d'un match sans source française :
-    d'abord les liens rapides (agendas Futbol Libre / Futbol Libre Mov
-    qui portent le même match), puis les chaînes Vavoo françaises.
-    True si au moins une source a été ajoutée à la liste."""
-    if not _vavoo_fallback():
-        return False
-    title = _clean_label(match_label)
-    try:
-        warm = _agenda_ready() and site_vavoo.is_warm()
-    except Exception:
-        warm = False
-    if not warm:
-        # agendas ou caches Vavoo pas encore prêts : dire à l'utilisateur
-        # pourquoi la liste tarde un instant (normalement < quelques s)
-        Dialog.notification(NAME, u'[COLOR gold]Recherche de sources de dépannage…[/COLOR]',
-                            ICON, 4000, False)
-    added = 0
-    # 1) sources rapides : le même match dans les agendas fllibre/fmov
-    try:
-        fast = _match_fast_events(title)
-    except Exception as exc:
-        log_info('fast agenda match failed: {0!r}'.format(exc))
-        fast = []
-    for e in fast:
-        try:
-            etitle = six.ensure_text(e['title'], encoding='utf-8', errors='replace')
-            servers = e.get('servers') or []
-            if not servers:
-                continue
-            payload = json.dumps({'k': e['_k'], 's': servers,
-                                  't': etitle, 'p': e.get('poster') or '',
-                                  'nf': 1})
-            label_ = u'[B][COLOR lime]{0}[/COLOR][/B] [COLOR gray]· rapide[/COLOR]'.format(etitle)
-            info = {'title': u'{0} | {1}'.format(title, etitle),
-                    'plot': u'{0} — source rapide « {1} » : {2} serveur(s) à '
-                            u'choisir. Mêmes liens que les menus Futbol '
-                            u'Libre / Futbol Libre Mov, proposés en premier '
-                            u'car plus rapides que Vavoo.'.format(
-                                title, etitle, len(servers))}
-            addDir(label_, payload, 'site_streams', e.get('poster') or poster,
-                   title, isFolder=True, infoLabels=info)
-            added += 1
-        except Exception as exc:
-            log_info('fast agenda item failed: {0!r}'.format(exc))
-    # 2) chaînes Vavoo françaises (moteur grille TV + heuristiques)
-    try:
-        chans = site_vavoo.fallback_channels(title)
-    except Exception as e:
-        log_info('vavoo fallback failed: {0!r}'.format(e))
-        chans = []
-    for ch in chans:
-        surl = (ch.get('urls') or [''])[0]
-        if not surl:
-            continue
-        payload = json.dumps({'k': site_vavoo.SUBSITES[0].KEY, 'u': surl,
-                              'alt': ch['urls'][1:],
-                              't': title, 'p': ch.get('logo') or ''})
-        # horaire du programme trouvé dans la grille TV, s'il y en a un
-        st, sp = ch.get('epg_start') or 0, ch.get('epg_stop') or 0
-        epg_tag = u''
-        if st and sp:
-            now_s = time.time()
-            if st <= now_s <= sp:
-                epg_tag = u'en direct'
-            else:
-                epg_tag = u'\u00e0 {0}'.format(six.ensure_text(
-                    datetime.fromtimestamp(st).strftime('%H:%M'),
-                    encoding='utf-8', errors='replace'))
-        epg_title = six.ensure_text(ch.get('epg_title') or u'',
-                                    encoding='utf-8', errors='replace')
-        if epg_title:
-            info = {'title': u'{0} | {1} (Vavoo)'.format(title, ch['title']),
-                    'plot': u'{0} — {1} via Vavoo. Grille TV {2} : \u00ab {3} \u00bb '
-                            u"(l'horaire peut changer, le match n'est pas "
-                            u"garanti sur cette cha\u00eene).".format(
-                                title, ch['title'], epg_tag or u'(programme)',
-                                epg_title)}
-        else:
-            info = {'title': u'{0} | {1} (Vavoo)'.format(title, ch['title']),
-                    'plot': u"{0} — {1} via Vavoo : cha\u00eene fran\u00e7aise propos\u00e9e "
-                            u"en d\u00e9pannage (le match n'est pas garanti sur "
-                            u"cette cha\u00eene).".format(title, ch['title'])}
-        label_ = u'[B][COLOR gold]{0}[/COLOR][/B]'.format(ch['title'])
-        if epg_tag:
-            label_ += u' [COLOR cyan]\u00b7 {0}[/COLOR]'.format(epg_tag)
-        label_ += u' [COLOR gray]\u00b7 Vavoo[/COLOR]'
-        addDir(label_, payload, 'site_play',
-               ch.get('logo') or poster, title, isFolder=False,
-               infoLabels=info)
-    return bool(added or chans)
-
-
 # Les trois miroirs du service principal sont affichés discrètement
 # « un », « deux », « trois » au lieu des domaines réels.
 _MIRROR_LABELS = ((r'vertex\.st', u'un'), (r'nexa\.st', u'deux'), (r'kora\.st', u'trois'))
@@ -594,23 +359,13 @@ def get_stream(name, url):  # 4
                 sstreams.append((url_, chan))
 
     if len(sstreams) < 1:
-        # rattachement Vavoo : chaînes françaises de dépannage proposées
-        # pour ce match quand il n'a aucune source française
-        fb = _add_vavoo_fallback(name) if fr_only else False
-        if fb:
-            control.infoDialog(u'[COLOR gold]Aucune source française native — '
-                               u'sources de dépannage proposées '
-                               u'(rapides d\'abord, puis Vavoo).[/COLOR]',
-                               NAME, ICON, 6000)
-        elif fr_only:
+        if fr_only:
             control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]\n"
                                u"[COLOR lime]Réglage : « Uniquement les sources françaises » dans les paramètres.[/COLOR]",
                                NAME, ICON, 7000)
         else:
             control.infoDialog(u"[COLOR gold]Aucun lien disponible pour le moment.\n "
                                u"[COLOR lime]Réessayez plus tard ![/COLOR]", NAME, ICON, 5000)
-        xbmcplugin.setContent(_handle, 'videos')
-        xbmcplugin.endOfDirectory(_handle)
         return
     else:
         if len(sstreams) > 1:
@@ -1213,7 +968,8 @@ def addDir(name, url, mode, iconimage, description, isFolder=True, infoLabels=No
     if infoLabels:
         liz.setInfo(type="Video", infoLabels=infoLabels)
     if not isFolder:
-        if mode == 'settings' or mode == 'version' or mode == 'clear' or mode == 'play_stream' or mode == 'site_play' or mode == 'vavoo_diag':
+        if mode == 'settings' or mode == 'version' or mode == 'clear' or mode == 'play_stream' or mode == 'site_play' \
+                or mode == 'epg_info' or mode == 'epg_none' or mode == 'epg_refresh':
             isFolder = False
         else:
             liz.setProperty('IsPlayable', 'true')
@@ -1221,15 +977,6 @@ def addDir(name, url, mode, iconimage, description, isFolder=True, infoLabels=No
 
 
 def site_events_menu(key):
-    # préchauffage Vavoo (catalogue + grille TV), LiveWatch et agendas
-    # rapides en arrière-plan pour des sources de dépannage instantanées
-    # au clic
-    try:
-        site_vavoo.warmup()
-        site_livewatch.warmup()
-        _agenda_warm()
-    except Exception:
-        pass
     site = SITES[key]
     try:
         events = site.list_events()
@@ -1244,39 +991,20 @@ def site_events_menu(key):
         except Exception as e:
             log_info('emls fallback failed: {0!r}'.format(e))
         key = site_futbollibre.KEY
-    # Vavoo subsites set NO_FR_FILTER: every channel is French by
-    # definition and their server names are generic "Serveur N", so the
-    # "Uniquement les sources françaises" setting must not hide them
-    # (it wiped the whole Vavoo lists with the misleading message
-    # "Aucune source française parmi les matchs de ce site").
-    fr_only = _french_only() and not getattr(site, 'NO_FR_FILTER', False)
-    vavoo_fb = _vavoo_fallback()
+    fr_only = _french_only()
     shown = 0
     for e in events:
-        # événement sans serveur français : masqué, sauf si le rattachement
-        # Vavoo est actif (ses sources Vavoo de dépannage seront proposées
-        # dans le menu des serveurs)
-        no_fr = fr_only and e.get('servers') and \
-            not _servers_have_french(e.get('servers'))
-        if no_fr and not vavoo_fb:
+        if fr_only and e.get('servers') and not _servers_have_french(e.get('servers')):
             continue
-        _add_site_event(key, site, e, vavoo=no_fr)
+        _add_site_event(key, site, e)
         shown += 1
     if events and not shown:
         control.infoDialog(u"[COLOR gold]Aucune source française parmi les matchs de ce site.[/COLOR]", NAME, ICON, 6000)
-    if not events and key.startswith('vavoo'):
-        control.infoDialog(
-            u'[COLOR red]Vavoo est momentanément inaccessible '
-            u'(connexion ou serveur). Réessayez plus tard.[/COLOR]',
-            NAME, ICON, 6000)
-        addDir(u'[B][COLOR gold]Diagnostic Vavoo — voir pourquoi la liste '
-               u'est vide[/COLOR][/B]', 'diag', 'vavoo_diag', ICON, FANART,
-               False, infoLabels={'title': u'Diagnostic Vavoo'})
     xbmcplugin.setContent(_handle, 'movies')
     xbmcplugin.endOfDirectory(_handle)
 
 
-def _add_site_event(key, site, e, vavoo=False):
+def _add_site_event(key, site, e):
     # title colour signals state: cyan = live, gold = upcoming, grey = finished.
     colors = {'live': 'cyan', 'soon': 'gold', 'done': 'grey'}
     t = time_convert(e['start_ms']) if e['start_ms'] else u'-'
@@ -1292,8 +1020,6 @@ def _add_site_event(key, site, e, vavoo=False):
     else:
         label = u'{0}[COLOR cyan]{1}[/COLOR] [COLOR {2}][B]{3}[/B][/COLOR]'.format(
             cc, t, colors.get(e['status'], 'gold'), title)
-    if vavoo:  # match conservé grâce au rattachement Vavoo -> balise
-        label += u' [COLOR gold][Vavoo][/COLOR]'
     # carry the event's title + poster down the chain so the servers menu
     # and the player show the match, not the generic SportHD art.
     payload = json.dumps({'k': key, 's': e['servers'],
@@ -1309,59 +1035,6 @@ def fmov_menu():
     addDir(u'[B][COLOR gold]Rechercher[/COLOR][/B]', 'fmov', 'fmov_search', ICON, FANART, True,
            infoLabels={'title': u'Rechercher', 'plot': u'Rechercher dans les trois listes (équipe, championnat…).'})
     xbmcplugin.endOfDirectory(_handle)
-
-
-def vavoo_menu():
-    for s in site_vavoo.SUBSITES:
-        addDir(u'[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(s.NAME), s.KEY,
-               'site_events', ICON, FANART, True,
-               infoLabels={'title': s.NAME, 'plot': s.DESC})
-    addDir(u'[B][COLOR gold]Diagnostic Vavoo (dépannage)[/COLOR][/B]', 'diag',
-           'vavoo_diag', ICON, FANART, False,
-           infoLabels={'title': u'Diagnostic Vavoo',
-                       'plot': u'Teste la connexion à Vavoo (catalogue, '
-                               u'signature, cache, lecture) et affiche la '
-                               u'cause exacte des listes vides.'})
-    xbmcplugin.endOfDirectory(_handle)
-
-
-def vavoo_diag():
-    rows = []
-    try:
-        rows = site_vavoo.diagnostic()
-    except Exception as e:
-        log_info('vavoo diagnostic failed: {0!r}'.format(e))
-    lines = [u'[B]Diagnostic Vavoo — SportHD {0}[/B]'.format(VERSION), u'']
-    for label, ok, detail in rows:
-        state = (u'[COLOR lime]OK    [/COLOR]' if ok
-                 else u'[COLOR red]ECHEC[/COLOR]')
-        lines.append(u'{0}  {1} : {2}'.format(state, label, detail))
-    if not rows:
-        lines.append(u'[COLOR red]ECHEC[/COLOR]  diagnostic impossible')
-    lines.append(u'')
-    if site_vavoo.LAST_ERROR:
-        lines.append(u'Dernière erreur enregistrée :')
-        lines.append(u'[COLOR gold]{0}[/COLOR]'.format(site_vavoo.LAST_ERROR))
-        lines.append(u'')
-    if rows and not rows[0][1]:
-        lines.append(u'Le catalogue Vavoo est inaccessible depuis votre '
-                     u'connexion (blocage du fournisseur d\'accès, DNS ou '
-                     u'pare-feu). Essayez un autre réseau (partage de '
-                     u'connexion mobile) pour comparer.')
-    try:
-        xbmcgui.Dialog().textviewer(u'Diagnostic Vavoo', u'\n'.join(lines))
-    except Exception:
-        control.okDialog(u'Diagnostic Vavoo', u'\n'.join(lines))
-    try:
-        if xbmcgui.Dialog().select(
-                u'Diagnostic Vavoo — actions',
-                [u'Vider le cache Vavoo et réessayer', u'Fermer']) == 0:
-            site_vavoo.clear_cache()
-            control.infoDialog(
-                u'[COLOR gold]Cache Vavoo vidé — rouvrez les listes '
-                u'Vavoo.[/COLOR]', NAME, ICON, 5000)
-    except Exception:
-        pass
 
 
 def fmov_search():
@@ -1391,203 +1064,27 @@ def fmov_search():
     xbmcplugin.endOfDirectory(_handle)
 
 
-_QUAL_RES = {'4K': u'2160p', 'FHD': u'1080p', 'HD': u'720p', 'SD': u'576p'}
-
-
-def _add_livewatch_links(title, poster=ICON):
-    """Ajoute 3 liens « Lien 1 / 2 / 3 » via LiveWatch pour un match
-    sans source française.
-
-    Ce sont les chaînes françaises correspondant au match, trouvées par
-    DOUBLE CHASSE : le moteur Vavoo (grille TV + heuristique, pool
-    élargi à 8) PUIS la recherche directe dans le groupe France de
-    LiveWatch (~930 chaînes, plus large) qui attrape des chaînes que le
-    moteur ne voit pas. Chaque lien porte la résolution annoncée par le
-    site (4K/FHD/HD) quand elle existe et les URLs Vavoo de la même
-    chaîne pour la DOUBLE PORTE au clic (résolution parallèle Vavoo +
-    LiveWatch, la première qui répond gagne — ouverture aussi rapide
-    qu'une chaîne française native). Les liens sont pré-résolus en
-    arrière-plan dès l'affichage (un seul ticket pour les trois).
-    Rien n'est ajouté si le catalogue LiveWatch n'est pas encore prêt
-    (jamais d'attente à l'affichage ; il le sera au prochain menu).
-    """
-    try:
-        if not site_livewatch.is_warm():
-            site_livewatch.warmup()
-            return 0
-        chans = site_vavoo.fallback_channels(title, limit=8)
-        try:
-            lw_only = site_livewatch.search_french(title, limit=8)
-        except Exception as exc:
-            log_info('livewatch search_french failed: {0!r}'.format(exc))
-            lw_only = []
-        if lw_only:
-            have = set(site_vavoo._norm(c['title']) for c in chans)
-            chans = list(chans) + [c for c in lw_only
-                                   if site_vavoo._norm(c['title'])
-                                   not in have]
-    except Exception as exc:
-        log_info('livewatch backup failed: {0!r}'.format(exc))
-        return 0
-    if not chans:
-        return 0
-    links = site_livewatch.backup_links(chans, limit=3)
-    if not links:
-        return 0
-    # ouverture rapide : les 3 liens partent en pré-résolution tout de suite
-    site_livewatch.prewarm(links)
-    added = 0
-    for ch in links:
-        try:
-            payload = json.dumps({'k': site_livewatch.KEY,
-                                  'u': u'lw://{0}'.format(ch['id']),
-                                  'alt': [u'lw://{0}'.format(i)
-                                          for i in ch['ids']
-                                          if i != ch['id']],
-                                  'vav': ch.get('vav') or [],
-                                  't': title, 'p': poster})
-            qual = ch.get('quality') or ''
-            res = _QUAL_RES.get(qual)
-            if qual and res:
-                qtxt = u'Qualité annoncée : {0} (~{1}).'.format(qual, res)
-            elif qual:
-                qtxt = u'Qualité annoncée : {0}.'.format(qual)
-            else:
-                qtxt = u'Qualité non annoncée par le site.'
-            info = {'title': u'{0} | Lien {1} — {2} (LiveWatch)'.format(
-                        title, added + 1, ch['title']),
-                    'plot': u'{0} — {1} via la double porte Vavoo + '
-                            u'LiveWatch : les deux résolutions partent en '
-                            u'parallèle au clic, la première qui répond '
-                            u'gagne — ouverture aussi rapide qu\'une '
-                            u'chaîne française native. {2}'.format(
-                                title, ch['title'], qtxt)}
-            label = u'[B]Lien {0}[/B]'.format(added + 1)
-            if ch['title']:
-                label += u' · {0}'.format(ch['title'])
-            if qual:
-                label += u' ({0})'.format(qual)
-            addDir(label, payload, 'site_play', poster, title,
-                   isFolder=False, infoLabels=info)
-            added += 1
-        except Exception as exc:
-            log_info('livewatch item failed: {0!r}'.format(exc))
-    return added
-
-
 def site_streams_menu(payload):
     d = json.loads(payload)
     poster = d.get('p') or ICON
     title = d.get('t', '')
-    # same NO_FR_FILTER exception as site_events_menu (Vavoo servers are
-    # generic "Serveur N" and French by definition); the 'nf' flag does
-    # the same for the fast fallback sources (fllibre/fmov) whose server
-    # names are generic too ("Server1 (sportiskas)", "Disney+ (tvf90)")
-    fr_only = _french_only() and not d.get('nf') and not getattr(
-        SITES.get(d['k']), 'NO_FR_FILTER', False)
+    fr_only = _french_only()
     shown = 0
-    fr_shown = 0
     for sname, surl in d['s']:
         # server names carry accents too (e.g. "Señal 1") -- byte-str .format()
         # on a unicode arg raises UnicodeEncodeError in py2, so keep it unicode.
         sname = six.ensure_text(sname, encoding='utf-8', errors='replace')
-        is_fr = _is_french_source(sname, '')
-        if is_fr:
-            fr_shown += 1
-        if fr_only and not is_fr:
+        if fr_only and not _is_french_source(sname, ''):
             continue
         info = {'title': u'{0} | {1}'.format(title, sname), 'plot': title}
         addDir(u'[B]{0}[/B]'.format(sname),
                json.dumps({'k': d['k'], 'u': surl, 't': title, 'p': d.get('p', '')}),
                'site_play', poster, title, isFolder=False, infoLabels=info)
         shown += 1
-    # LiveWatch : réservé aux matchs SANS AUCUNE source française —
-    # « ce qui est déjà en français ne bouge pas ». 3 liens « Lien 1/2/3 »
-    # correspondant au match (mêmes chaînes que le moteur Vavoo, autres
-    # résolutions quand le site les annonce), pré-résolus en arrière-plan
-    # dès l'affichage pour s'ouvrir vite. Jamais pour les rubriques Vavoo
-    # (déjà des chaînes françaises) ni si le réglage de dépannage est coupé.
-    if not fr_shown and not d['k'].startswith('vavoo') and _vavoo_fallback():
-        lw_ok = False
-        try:
-            lw_ok = _add_livewatch_links(title, poster)
-        except Exception as exc:
-            log_info('livewatch backup menu failed: {0!r}'.format(exc))
-        if not shown:
-            if lw_ok:
-                control.infoDialog(
-                    u'[COLOR gold]Aucune source française native — '
-                    u'3 liens de secours LiveWatch proposés (ils se '
-                    u'préparent en arrière-plan).[/COLOR]', NAME, ICON, 6000)
-            elif _add_vavoo_fallback(title, poster):
-                # filet de sécurité si LiveWatch est indisponible
-                control.infoDialog(
-                    u'[COLOR gold]Aucune source française — chaînes Vavoo '
-                    u'de dépannage proposées.[/COLOR]', NAME, ICON, 6000)
-            else:
-                control.infoDialog(
-                    u"[COLOR gold]Aucune source française pour ce match.[/COLOR]",
-                    NAME, ICON, 6000)
+    if not shown:
+        control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]", NAME, ICON, 6000)
     xbmcplugin.setContent(_handle, 'videos')
     xbmcplugin.endOfDirectory(_handle)
-
-
-def _resolve_dual_door(d):
-    """DOUBLE PORTE pour un lien LiveWatch : la MÊME chaîne est résolue
-    en parallèle par la porte Vavoo (rapide : ~0,4 s) et par la porte
-    LiveWatch (pré-résolue au menu -> ~0,1 s). La première qui répond
-    gagne ; l'autre n'est jamais attendue inutilement.
-
-    Retour (resultat, site, referer_url_ou_None) :
-      - porte LiveWatch : resultat = (m3u8, page) — site_play en tire
-        l'origine livewatch.icu (en-têtes côté CDN) ;
-      - porte Vavoo : resultat = m3u8, referer_url = l'URL Vavoo (pour
-        l'origine + le User-Agent MediaHubMX/2, comme un flux natif).
-      - (None, None, None) si les deux portes échouent.
-    """
-    res = {}
-
-    def _lw(u):
-        try:
-            res['lw'] = site_livewatch.resolve(u)
-        except Exception as exc:
-            log_info('double porte lw {0}: {1!r}'.format(u, exc))
-
-    def _vav(u):
-        try:
-            m = site_vavoo.resolve_channel(u)
-            if m:
-                res['vav'] = m
-                res['vav_url'] = u
-        except Exception as exc:
-            log_info('double porte vav {0}: {1!r}'.format(u, exc))
-
-    ths = [threading.Thread(target=_lw, args=(d.get('u') or '',))]
-    for u in (d.get('vav') or [])[:2]:
-        ths.append(threading.Thread(target=_vav, args=(u,)))
-    for t in ths:
-        t.daemon = True
-        t.start()
-    # premier succès gagne : LiveWatch pré-résolu -> instantané, sinon
-    # la porte Vavoo répond en général en ~0,4 s
-    deadline = time.time() + 16.0
-    while time.time() < deadline:
-        if 'lw' in res or 'vav' in res:
-            break
-        if not any(t.is_alive() for t in ths):
-            break
-        time.sleep(0.1)
-    if 'lw' in res:
-        return res['lw'], site_livewatch, None
-    if 'vav' in res:
-        return res['vav'], site_vavoo, res.get('vav_url')
-    for t in ths:                # un dernier thread encore vivant : finir
-        t.join(timeout=8.0)
-    if 'lw' in res:
-        return res['lw'], site_livewatch, None
-    if 'vav' in res:
-        return res['vav'], site_vavoo, res.get('vav_url')
-    return None, None, None
 
 
 def site_play(payload):
@@ -1596,50 +1093,7 @@ def site_play(payload):
     title = d.get('t') or NAME
     poster = d.get('p') or ICON
     Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
-    # 'alt' (rattachement Vavoo) : variantes de la même chaîne, essayées
-    # dans l'ordre si la première ne résout pas.
-    links = [d.get('u') or ''] + [u for u in (d.get('alt') or []) if u]
-    result = None
-    play_site = site
-    vav_ref = None
-    if d['k'] == site_livewatch.KEY and (d.get('vav') or d.get('alt')):
-        # DOUBLE PORTE (v2.1.5) : LiveWatch (pré-résolu) + Vavoo partent
-        # en parallèle, la première qui répond gagne.
-        result, play_site, vav_ref = _resolve_dual_door(d)
-        if not result:
-            # portes principales KO : variantes LiveWatch restantes,
-            # puis URLs Vavoo restantes, comme avant
-            tried = set([d.get('u') or ''] + list(d.get('vav') or []))
-            for u in [x for x in (d.get('alt') or [])
-                      if x and x not in tried]:
-                try:
-                    result = site_livewatch.resolve(u)
-                    play_site = site_livewatch
-                except Exception as exc:
-                    log_info('site resolve {0} failed: {1!r}'.format(u, exc))
-                    result = None
-                if result:
-                    break
-            if not result:
-                for u in [x for x in (d.get('vav') or [])
-                          if x not in tried]:
-                    try:
-                        m = site_vavoo.resolve_channel(u)
-                    except Exception as exc:
-                        log_info('site resolve {0} failed: {1!r}'.format(u, exc))
-                        m = None
-                    if m:
-                        result, play_site, vav_ref = m, site_vavoo, u
-                        break
-    else:
-        for u in links:
-            try:
-                result = site.resolve(u)
-            except Exception as exc:
-                log_info('site resolve {0} failed: {1!r}'.format(u, exc))
-                result = None
-            if result:
-                break
+    result = site.resolve(d['u'])
     if not result:
         raise Exception('could not resolve stream for ' + d['u'])
     # resolve() normally returns just the m3u8 string; sites that chain
@@ -1647,11 +1101,9 @@ def site_play(payload):
     # wrapper) return (m3u8, final_page_url) since the CDN token's own
     # host, not the originally-clicked link, is what the player needs
     # for Referer/Origin.
-    flink, referer_url = result if isinstance(result, tuple) else \
-        (result, vav_ref or d['u'])
+    flink, referer_url = result if isinstance(result, tuple) else (result, d['u'])
     origin = '{uri.scheme}://{uri.netloc}'.format(uri=urlparse(referer_url))
-    stream_headers = {'Referer': origin + '/', 'Origin': origin,
-                      'User-Agent': play_site.UA}
+    stream_headers = {'Referer': origin + '/', 'Origin': origin, 'User-Agent': site.UA}
     # installed inputstream.ffmpegdirect (21.3.8) does not whitelist a
     # stream_headers listitem property -- its addon.xml listitemprops=
     # "...default_url|is_realtime_stream|..." has no headers entry, so
@@ -1702,6 +1154,91 @@ def site_play(payload):
     xbmc.Player().play(stream_url, liz, False)
 
 
+def epg_menu():
+    if epg_mod is None:
+        control.infoDialog(u'Module EPG indisponible', NAME, ICON, 5000)
+        return
+    if epg_mod.is_stale():
+        control.infoDialog(u'[COLOR gold]Mise à jour de la grille TV…[/COLOR]', NAME, ICON, 5000)
+        if not epg_mod.refresh():
+            control.infoDialog(u'[COLOR red]Grille TV indisponible (source xmltvfr.fr injoignable)[/COLOR]',
+                               NAME, ICON, 5000)
+            return
+    for _cid, _label in epg_mod.channels():
+        _cur, _nxt = epg_mod.now_next(_cid)
+        if _cur:
+            _name = u'[COLOR lime]●[/COLOR] [B]{0}[/B] — {1} ({2})'.format(
+                _label, _cur[2], epg_mod.fmt_hour(_cur[1]))
+            if _nxt:
+                _plot = u'{0}\n\n[COLOR gold]À suivre à {1} :[/COLOR] {2}'.format(
+                    _cur[4] or _cur[2], epg_mod.fmt_hour(_nxt[0]), _nxt[2])
+            else:
+                _plot = _cur[4] or _cur[2]
+        else:
+            _name = u'[COLOR grey]○[/COLOR] [B]{0}[/B]'.format(_label)
+            _plot = u'Grille du jour disponible — aucun programme en cours.'
+        addDir(_name, _cid, 'epg_channel', ICON, FANART, True,
+               infoLabels={'title': _label, 'plot': _plot})
+    addDir(u'[B][COLOR gold]Mettre à jour la grille[/COLOR][/B]', 'force', 'epg_refresh',
+           ICON, FANART, False)
+    xbmcplugin.setContent(_handle, 'movies')
+    xbmcplugin.endOfDirectory(_handle)
+
+
+def epg_channel_menu(url):
+    if epg_mod is None:
+        return
+    _now = time.time()
+    _items = epg_mod.programs(url)
+    if not _items:
+        control.infoDialog(u'Grille indisponible pour cette chaîne', NAME, ICON, 5000)
+        return
+    _day = None
+    for _p in _items:
+        _st, _sp, _ti, _su, _de, _ic = _p
+        _d = time.strftime('%d/%m', time.localtime(_st))
+        if _d != _day:
+            _day = _d
+            addDir(u'[B][COLOR gold]— {0} —[/COLOR][/B]'.format(_d), '', 'epg_none',
+                   ICON, FANART, False)
+        _mark = u'[COLOR lime]●[/COLOR] ' if _st <= _now < _sp else u''
+        _lbl = u'{0}{1} – {2}   {3}'.format(_mark, epg_mod.fmt_hour(_st),
+                                            epg_mod.fmt_hour(_sp), _ti)
+        if _su:
+            _lbl += u' | {0}'.format(_su)
+        addDir(_lbl, '{0}&ts={1}'.format(url, _st), 'epg_info', ICON, FANART, False,
+               infoLabels={'title': _ti, 'plot': _de or _ti})
+    xbmcplugin.setContent(_handle, 'movies')
+    xbmcplugin.endOfDirectory(_handle)
+
+
+def epg_info(url, ts):
+    if epg_mod is None:
+        return
+    try:
+        _ts = int(ts)
+    except Exception:
+        return
+    for _p in epg_mod.programs(url):
+        if _p[0] == _ts:
+            _head = _p[2] + (u' | {0}'.format(_p[3]) if _p[3] else u'')
+            xbmcgui.Dialog().ok(u'Grille TV Sport', _head,
+                                _p[4] or u'(pas de description)')
+            return
+
+
+def epg_refresh():
+    if epg_mod is None:
+        return
+    control.infoDialog(u'[COLOR gold]Téléchargement de la grille TV…[/COLOR]', NAME, ICON, 5000)
+    if epg_mod.refresh(force=True):
+        control.infoDialog(u'[COLOR lime]Grille mise à jour[/COLOR]', NAME, ICON, 5000)
+        epg_menu()
+    else:
+        control.infoDialog(u'[COLOR red]Échec de la mise à jour (source injoignable)[/COLOR]',
+                           NAME, ICON, 5000)
+
+
 def router(paramstring):
     params = dict(parse_qsl(paramstring))
     if params:
@@ -1726,10 +1263,6 @@ def router(paramstring):
             xbmc.executebuiltin('UpdateAddonRepos')
         elif params['mode'] == 'fmov_menu':
             fmov_menu()
-        elif params['mode'] == 'vavoo_menu':
-            vavoo_menu()
-        elif params['mode'] == 'vavoo_diag':
-            vavoo_diag()
         elif params['mode'] == 'fmov_search':
             fmov_search()
         elif params['mode'] == 'site_events':
@@ -1738,6 +1271,19 @@ def router(paramstring):
             site_streams_menu(params['url'])
         elif params['mode'] == 'site_play':
             site_play(params['url'])
+        elif params['mode'] == 'epg':
+            epg_menu()
+        elif params['mode'] == 'epg_channel':
+            epg_channel_menu(params['url'])
+        elif params['mode'] == 'epg_info':
+            _u = params.get('url', '')
+            if '&ts=' in _u:
+                _ch, _ts = _u.split('&ts=', 1)
+                epg_info(_ch, _ts)
+        elif params['mode'] == 'epg_refresh':
+            epg_refresh()
+        elif params['mode'] == 'epg_none':
+            pass
     else:
         Main_menu()
 
