@@ -258,12 +258,26 @@ def deduplicate_events(events):
 # sans aucune chaîne française disparaissent de la liste.
 # ---------------------------------------------------------------------------
 FRENCH_LANGS = ('fr', 'french', u'français', 'francais')
+# v3.7.1 — codes pays/langue EXPLICITEMENT non français : si le guide marque
+# la chaîne avec l'un de ces codes, elle n'est pas française même si son nom
+# contient une marque FR (Canal+ Sport 3/5 polonaises lang='PL', TSN3 'CA',
+# NFL Sunday Ticket 'US'…). Les codes inconnus restent jugés sur le nom.
+NON_FR_LANGS = ('pl', 'us', 'gb', 'uk', 'de', 'es', 'it', 'pt', 'nl', 'dk', 'no',
+                'se', 'fi', 'is', 'ie', 'gr', 'tr', 'ru', 'ua', 'cz', 'sk', 'ro',
+                'rs', 'hr', 'bg', 'hu', 'si', 'ee', 'lv', 'lt', 'sa', 'ae', 'qa',
+                'eg', 'ma', 'dz', 'tn', 'jp', 'cn', 'kr', 'in', 'au', 'nz', 'ca',
+                'mx', 'br', 'ar', 'cl', 'co', 'pe', 'en', 'eng')
 FRENCH_NAME_RE = re.compile(
     r'\bfr\b|\[fr\]|\(fr\)|french|fran[cç]ais|\bfrance\b|canal\+\s*foot|rmc\s*sport|'
     r'quipe|tf1\b|\bm6\b|\bw9\b|\btmc\b|ligue1'
     # v3.6.1 — chaînes FR DaddyLive sans suffixe « France » ni champ langue :
     r'|bein sports (max )?\d+ france|eurosport \d+ france'
-    r'|canal\+|tennis\+|golf\+|\bfoot\+|automoto|motogp|infosport'
+    # v3.7.1 — « canal+ » seul ne suffit plus : les Canal+ Sport 1-5 et
+    # Canal+ 1 numérotés sont des chaînes ÉTRANGÈRES (Pologne…) ; la France
+    # n'a que Canal+ Sport (sans numéro) et Canal+ Sport 360. On exclut donc
+    # tout « canal+ » suivi d'un numéro nu ou de « sport 1-5 » (360 reste FR).
+    r'|canal\+(?! ?sport ?[1-9]\b)(?! ?[1-9]\b)'
+    r'|tennis\+|golf\+|\bfoot\+|automoto|motogp|infosport'
     # v3.6.2 — chaînes FR ajoutées par l'enrichissement footao :
     r'|6ter|\barte\b|\bc8\b|\blci\b|\bbfm\b')
 
@@ -291,7 +305,9 @@ def _french_only():
 
 
 def _is_french_source(name, lang):
-    """True si la chaîne/le serveur est en français (code pays, langue ou nom)."""
+    """True si la chaîne/le serveur est en français (code pays, langue ou nom).
+    v3.7.1 : un code langue explicite non français (PL, US, GB…) rejette la
+    chaîne AVANT tout test de nom — fin des Canal+ Sport 3/5 polonaises."""
     try:
         lang_s = six.ensure_text(lang or u'', encoding='utf-8', errors='replace').strip().lower()
         name_s = six.ensure_text(name or u'', encoding='utf-8', errors='replace').lower()
@@ -299,6 +315,8 @@ def _is_french_source(name, lang):
         return False
     if lang_s in FRENCH_LANGS:
         return True
+    if lang_s and lang_s in NON_FR_LANGS:
+        return False
     if name_s and NOT_FRENCH_NAME_RE.search(name_s):
         return False
     return bool(name_s and FRENCH_NAME_RE.search(name_s))

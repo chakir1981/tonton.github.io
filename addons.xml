@@ -56,7 +56,8 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.0" provider-name="chakir1981">
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.1" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -73,6 +74,10 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
+      [B]v3.7.1[/B] 02/11/2026
+- Fini les liens polonais dans le mode « Uniquement les sources françaises » : les chaînes Canal+ Sport 3, Canal+ Sport 5, Canal+ 1, etc. numérotées sont des chaînes ÉTRANGÈRES (Ekstraklasa polonaise…) — la France n'a que Canal+ Sport et Canal+ Sport 360. Elles sont maintenant rejetées, même si leur nom contient « Canal+ ».
+- Double protection : 1) un code langue explicite du guide (PL, US, GB, DE…) rejette la chaîne avant tout test de nom ; 2) le filtre par nom n'accepte plus un « Canal+ » suivi d'un numéro (sauf Canal+ Sport 360 / Afrique).
+- Corrigé aussi côté DaddyLive : la grille ne peut plus injecter une Canal+ numérotée polonaise comme lien français.
       [B]v3.7.0[/B] 02/11/2026
 - Réglage « Uniquement les sources françaises » devenu STRICT : seuls les matchs réellement diffusés sur une chaîne française du guide restent affichés, avec leurs 3 liens miroirs (un / deux / trois). Fini les faux positifs : un match sans chaîne FR du guide mais simplement doublé d'une entrée DaddyLive (ex. NFL Sunday Ticket sur Denver vs Kansas City) qui n'affichait que 2 liens est désormais masqué quand le réglage est actif.
 - Configuration distante : l'add-on lit un fichier de secours (sporthdme_remote.json) publié sur le site de l'add-on. Si les trois domaines DaddyLive intégrés tombent tous, les miroirs listés dans ce fichier sont essayés automatiquement — réparation possible en éditant un JSON, sans nouvelle version (cache 6 h, panneau réseau silencieux).

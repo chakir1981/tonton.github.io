@@ -119,8 +119,12 @@ LIVE_WINDOW_MIN = 240   # lime "live" colour window
 # Eurosport Greece/NL...) ne comptent PAS comme françaises.
 # ---------------------------------------------------------------------------
 _ENDS_FR = re.compile(r'France$', re.IGNORECASE)
+# v3.7.1 — « Canal+ Sport 2/3/4/5 » et « Canal+ 1 » sont des chaînes
+# ÉTRANGÈRES (Pologne…) : la France n'a que Canal+ Sport (sans numéro),
+# Canal+ Sport 360 et Canal+ Sport Afrique. On a donc retiré « ?\d+ » de la
+# branche Sport pour ne plus accepter les variantes numérotées.
 _BRANDS_FR = re.compile(
-    r'^(Canal\+ ?(France|Sport( ?\d+| ?360| ?Afrique)*|Foot|Premium|D[ée]cal[ée]|Cinema|Series|'
+    r'^(Canal\+ ?(France|Sport( ?360| ?Afrique)?|Foot|Premium|D[ée]cal[ée]|Cinema|Series|'
     r'Formula ?1|Moto ?GP|Golf|Tennis)'
     r'|beIN Sports (MAX )?\d+ France'
     r'|RMC Sport ?\d+'
