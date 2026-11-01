@@ -89,15 +89,13 @@ def log_error(msg):
 
 
 def Main_menu():
-    # addDir('[B][COLOR gold]Channels 24/7[/COLOR][/B]', 'https://1.livesoccer.sx/program.php', 14, ICON, FANART, '')
+    # v2.0.5 — add-on recentré : seule la rubrique « ÉVÉNEMENTS EN DIRECT »
+    # (affichée en blanc) est conservée au menu. Les rubriques bleues
+    # « Événements en direct » (doublon embedlivesports), « Football Libre »
+    # et « Football Libre MOV » ne sont plus proposées (les modules et les
+    # modes du routeur restent en place, simplement sans entrée de menu).
     addDir(u'[B][COLOR white]ÉVÉNEMENTS EN DIRECT[/COLOR][/B]', Live_url, 'events', ICON, FANART, True)
-    for _s in EXTRA_SITES:
-        addDir('[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(_s.NAME),
-               _s.KEY, 'site_events', ICON, FANART, True,
-               infoLabels={'title': _s.NAME, 'plot': getattr(_s, 'DESC', '')})
-    addDir('[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(site_futbolmov.NAME),
-           'fmov', 'fmov_menu', ICON, FANART, True,
-           infoLabels={'title': site_futbolmov.NAME, 'plot': site_futbolmov.DESC})
+    # addDir('[B][COLOR gold]Channels 24/7[/COLOR][/B]', 'https://1.livesoccer.sx/program.php', 14, ICON, FANART, '')
     # addDir('[B][COLOR gold]Alternative VIEW [/COLOR][/B]', '', '', ICON, FANART, '')
     # addDir('[B][COLOR gold]Alternative LIVE EVENTS[/COLOR][/B]', Alt_url, 15, ICON, FANART, '')
     # addDir('[B][COLOR white]SPORTS[/COLOR][/B]', '', 3, ICON, FANART, '')
