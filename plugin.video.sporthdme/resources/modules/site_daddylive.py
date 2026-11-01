@@ -716,6 +716,77 @@ def enrich_servers(title, servers, today=None, fetch=None):
 
 
 # ---------------------------------------------------------------------------
+# v3.6.3 — liens FR de la grille pour le menu « ÉVÉNEMENTS EN DIRECT » :
+# fr_links_for(team1, team2) retrouve le match sur la grille DaddyLive du
+# jour (cache 10 min), renvoie ses chaînes FR, enrichies par footao.
+# Toute panne renvoie [] : le menu garde alors le comportement 3.6.0.
+# ---------------------------------------------------------------------------
+
+SCHED_TTL = 600              # grille du jour rechargée au plus 1x/10 min
+_sched_cache = {'ts': 0.0, 'events': None}
+
+
+def _schedule_fr_events():
+    """Grille du jour (liste d'événements normalisés) avec cache 10 min."""
+    now = time.time()
+    if _sched_cache['events'] is not None and now - _sched_cache['ts'] < SCHED_TTL:
+        return _sched_cache['events']
+    domain = _working_domain()
+    if not domain:
+        raise Exception('DaddyLive injoignable (%s)' % ', '.join(DOMAINS))
+    txt, code = _get(domain + '/index.php', referer=domain + '/')
+    if code != 200:
+        raise Exception('grille DaddyLive -> HTTP %s' % code)
+    events = parse_schedule(txt, domain)
+    _sched_cache['ts'] = now
+    _sched_cache['events'] = events
+    return events
+
+
+def fr_links_for(team1, team2, start_ms=0, today=None):
+    """Chaînes FR de la grille DaddyLive pour un match, enrichies footao.
+
+    Renvoie [[nom, url_watch], …] (peut être vide). Ne lève jamais :
+    en cas de problème on renvoie [] et le menu reste comme en 3.6.0.
+    """
+    try:
+        t1, t2 = _club_key(_norm_team(team1 or u'')), _club_key(_norm_team(team2 or u''))
+        if not t1 or not t2:
+            return []
+        events = _schedule_fr_events()
+
+        def ev_score(e):
+            eteams = [_club_key(_norm_team(x)) for x in teams_from_title(e['title'])]
+            if not eteams:
+                return (0, 0)
+            inter = len(set(eteams).intersection((t1, t2)))
+            dt = 0
+            if start_ms and e.get('start_ms'):
+                dt = -abs(e['start_ms'] - start_ms) // 3600000  # heures d'écart
+            return (inter, dt)
+
+        best, best_key = None, (0, 0)
+        for e in events:
+            key = ev_score(e)
+            if key > best_key:
+                best, best_key = e, key
+        if not best or best_key[0] < 2:
+            return []
+        fr = [c for c in best['servers'] if is_fr_channel(c[0])]
+        if not fr:
+            return []
+        fr = [list(c) for c in fr]
+        # v3.6.2 — enrichissement footao : 2e diffuseur manquant
+        try:
+            fr = enrich_servers(best['title'], fr, today=today)
+        except Exception:
+            pass
+        return fr
+    except Exception:
+        return []
+
+
+# ---------------------------------------------------------------------------
 # Resolution
 # ---------------------------------------------------------------------------
 

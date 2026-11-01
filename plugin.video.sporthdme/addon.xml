@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.6.2" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.6.3" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -16,6 +16,11 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
+      [B]v3.6.3[/B] 02/11/2026
+- Retour au menu épuré de la 3.6.0 : une seule rubrique « ÉVÉNEMENTS EN DIRECT » — les deux rubriques DaddyLive dédiées de la 3.6.1 sont supprimées.
+- Les liens français arrivent DANS « ÉVÉNEMENTS EN DIRECT » : chaque match du guide gagne les chaînes FR de la grille DaddyLive qui le diffusent réellement (marquées « [DaddyLive] »), enrichies par footao.tv quand un 2e diffuseur existe (marqué « (footao) »), chacune doublée d'un lien « (repli) » qui force la résolution playlist-token si la voie _econfig tombe.
+- Les matchs sans chaîne FR dans le guide mais diffusés sur une chaîne française de la grille DaddyLive apparaissent désormais aussi.
+- Si DaddyLive/footao sont injoignables, le menu se comporte exactement comme la 3.6.0 (aucune régression).
       [B]v3.6.2[/B] 02/11/2026
 - Chaque match gagne des liens : enrichissement footao.tv — quand la grille DaddyLive ne liste qu'une chaîne française, le guide footao (chaînes réellement diffusées en France) ajoute le deuxième diffuseur (Canal+ Foot, Canal+, beIN, RMC, Ligue1+…), marqué « (footao) ». 150 clubs couverts (Ligue 1/2, PL, Liga, Serie A, Bundesliga, C1/C2, sélections), cache 1 h, panne silencieuse.
 - Deux liens par chaîne : chaque chaîne d'un match propose « Chaîne » (résolution _econfig) et « Chaîne (repli) » (résolution playlist-token) — si un résolveur casse, l'autre reste jouable.

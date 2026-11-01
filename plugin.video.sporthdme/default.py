@@ -27,7 +27,11 @@ from dateutil import parser, tz
 # module exposing NAME/KEY/list_events()/resolve() and append it here.
 # tvsport.guide is no longer a menu entry: it is the fallback schedule for
 # ÉVÉNEMENTS EN DIRECT and Événements en direct (see Live_fallback_url).
-EXTRA_SITES = [site_embedlivesports, site_futbollibre, site_daddylive]
+EXTRA_SITES = [site_embedlivesports, site_futbollibre]
+# v3.6.3 — site_daddylive n'est plus une source de menu : son module fournit
+# fr_links_for (chaînes FR de la grille pour chaque match du guide),
+# l'enrichissement footao et la résolution _econfig/playlist-token des liens
+# watch.php que le menu Événements affiche désormais.
 SITES = {s.KEY: s for s in EXTRA_SITES}
 # futbol-libre.mov: one main-menu entry -> its three lists (fmov_menu)
 SITES.update((s.KEY, s) for s in site_futbolmov.SUBSITES)
@@ -96,14 +100,9 @@ def Main_menu():
     # et « Football Libre MOV » ne sont plus proposées (les modules et les
     # modes du routeur restent en place, simplement sans entrée de menu).
     addDir(u'[B][COLOR white]ÉVÉNEMENTS EN DIRECT[/COLOR][/B]', Live_url, 'events', ICON, FANART, True)
-    # v3.6.1 — les deux rubriques DaddyLive (pépite + bonus) :
-    # planning FR du jour + chaînes françaises en continu.
-    addDir(u'[B][COLOR gold]Matchs du jour (FR)[/COLOR][/B]', site_daddylive.KEY,
-           'site_events', ICON, FANART, True,
-           infoLabels={'title': u'Matchs du jour (FR)', 'plot': site_daddylive.DESC})
-    addDir(u'[B][COLOR gold]Chaînes FR (24/7)[/COLOR][/B]', '', 'dlhd_247', ICON,
-           FANART, True,
-           infoLabels={'title': u'Chaînes FR (24/7)', 'plot': site_daddylive.DESC_247})
+    # v3.6.3 — retour au menu épuré 3.6.0 : les deux rubriques DaddyLive de
+    # la 3.6.1 sont retirées. Leurs liens FR arrivent désormais DANS
+    # « ÉVÉNEMENTS EN DIRECT » (get_events -> fr_links_for + footao + replis).
     # addDir('[B][COLOR gold]Channels 24/7[/COLOR][/B]', 'https://1.livesoccer.sx/program.php', 14, ICON, FANART, '')
     # addDir('[B][COLOR gold]Alternative VIEW [/COLOR][/B]', '', '', ICON, FANART, '')
     # addDir('[B][COLOR gold]Alternative LIVE EVENTS[/COLOR][/B]', Alt_url, 15, ICON, FANART, '')
@@ -168,9 +167,6 @@ def get_events(url):  # 5
     filtered_out = 0
     for match in matches:
         channels = match.get("channels", [])
-        if fr_only and not _channels_have_french(channels):
-            filtered_out += 1
-            continue
         # links = match['additionalLinks']
         # links.extend(match['channels'])
         icon = match.get('team1Img', ICON)
@@ -196,6 +192,25 @@ def get_events(url):  # 5
             except Exception:
                 compare = int('999999999999')
                 ftime = '-'
+
+        # v3.6.3 — liens FR de la grille DaddyLive pour CE match (chaînes
+        # réellement diffusées, enrichies footao, doublées d'un repli).
+        # Panne silencieuse -> [] : le menu reste exactement celui de la 3.6.0.
+        if team1 and team2 and compare != int('999999999999'):
+            dl_links = site_daddylive.fr_links_for(team1, team2, compare)
+        else:
+            dl_links = []
+        for dl_name, dl_url in dl_links:
+            label = dl_name if u'(footao)' in dl_name else u'%s [DaddyLive]' % dl_name
+            channels.append({'channelName': label, 'language': 'fr',
+                             'links': [dl_url], 'dl': 1})
+            # v3.6.2 — double lien « (repli) » : résolution playlist-token
+            channels.append({'channelName': u'%s (repli)' % label, 'language': 'fr',
+                             'links': [dl_url], 'dl': 1, 'f': 1})
+
+        if fr_only and not (_channels_have_french(channels) or dl_links):
+            filtered_out += 1
+            continue
 
         duration_in_ms = match['duration'] * 60 * 1000
 
@@ -353,7 +368,8 @@ def get_stream(name, url):  # 4
 
     import ast
     fr_only = _french_only()
-    sstreams = []
+    sstreams = []   # liens du guide -> play_stream (resolve2)
+    dl_dirs = []    # v3.6.3 — liens de la grille DaddyLive -> site_play
     for event in ast.literal_eval(data):
         if not isinstance(event, dict):  # TNT Sports 1
             datos = get_links_for_channel(event) or []
@@ -374,9 +390,14 @@ def get_stream(name, url):  # 4
             chan = six.ensure_text(event.get('name', ''), encoding='utf-8', errors='replace')
             chan = u'[COLOR gold]{}[/COLOR] - {}'.format(chan, lang)
             for url_ in link:
-                sstreams.append((url_, chan))
+                # v3.6.3 — lien watch.php de la grille DaddyLive : résolution
+                # par le module DaddyLive (_econfig ; playlist-token si repli)
+                if event.get('dl') and 'watch.php?id=' in str(url_):
+                    dl_dirs.append((str(url_), chan, bool(event.get('f'))))
+                else:
+                    sstreams.append((url_, chan))
 
-    if len(sstreams) < 1:
+    if not sstreams and not dl_dirs:
         if fr_only:
             control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]\n"
                                u"[COLOR lime]Réglage : « Uniquement les sources françaises » dans les paramètres.[/COLOR]",
@@ -385,22 +406,29 @@ def get_stream(name, url):  # 4
             control.infoDialog(u"[COLOR gold]Aucun lien disponible pour le moment.\n "
                                u"[COLOR lime]Réessayez plus tard ![/COLOR]", NAME, ICON, 5000)
         return
-    else:
-        if len(sstreams) > 1:
-            for i in sstreams:
-                title, link = i[1], i[0]
-                if not 'vecdn' in link:
-                    # if not 'https://bedsport' in link and not 'vecdn' in link:
-                    if not str(link) == str(title):
-                        title += ' | {}'.format(_link_label(link))
-                info = {'title': title, 'sorttitle': '', 'plot': name}
-                addDir(title, link, 'play_stream', ICON, name, isFolder=False, infoLabels=info)
-            xbmcplugin.setContent(_handle, 'videos')
-            xbmcplugin.endOfDirectory(_handle)
-
-        else:
-            link = sstreams[0][0]
-            resolve2(name, link)
+    if len(sstreams) == 1 and not dl_dirs:
+        # un seul lien du guide et aucun lien DaddyLive : lecture directe
+        # (comportement 3.6.0 conservé)
+        link = sstreams[0][0]
+        resolve2(name, link)
+        return
+    for i in sstreams:
+        title, link = i[1], i[0]
+        if not 'vecdn' in link:
+            # if not 'https://bedsport' in link and not 'vecdn' in link:
+            if not str(link) == str(title):
+                title += ' | {}'.format(_link_label(link))
+        info = {'title': title, 'sorttitle': '', 'plot': name}
+        addDir(title, link, 'play_stream', ICON, name, isFolder=False, infoLabels=info)
+    # v3.6.3 — les liens de la grille DaddyLive (grille + footao) passent par
+    # site_play : « (repli) » force la résolution playlist-token (f=1).
+    for url_, chan, is_f in dl_dirs:
+        info = {'title': chan, 'sorttitle': '', 'plot': name}
+        addDir(chan, json.dumps({'k': 'dlhd', 'u': url_, 't': name, 'p': '',
+                                 'f': '1' if is_f else ''}),
+               'site_play', ICON, name, isFolder=False, infoLabels=info)
+    xbmcplugin.setContent(_handle, 'videos')
+    xbmcplugin.endOfDirectory(_handle)
 
 
 def xbmc_curl_encode(url, headers):
@@ -1130,52 +1158,20 @@ def site_streams_menu(payload):
     xbmcplugin.endOfDirectory(_handle)
 
 
-def dlhd_247_menu():
-    """v3.6.1 — chaînes françaises en continu de DaddyLive (24-7-channels.php).
-
-    Chaque chaîne passe par le menu serveurs standard (site_streams ->
-    site_play) : une seule voie de lecture, le réglage « Uniquement les
-    sources françaises » s'applique naturellement.
-    """
-    try:
-        channels = site_daddylive.list_channels_247()
-    except Exception as e:
-        log_info('dlhd 247 failed: {0!r}'.format(e))
-        channels = []
-    if not channels:
-        control.infoDialog(u"[COLOR red]DaddyLive injoignable pour le moment.[/COLOR]",
-                           NAME, ICON, 5000)
-        xbmcplugin.endOfDirectory(_handle)
-        return
-    fr_only = _french_only()
-    shown = 0
-    for cname, curl in channels:
-        if fr_only and not site_daddylive.is_fr_channel(cname):
-            continue
-        payload = json.dumps({'k': site_daddylive.KEY, 's': [[cname, curl]],
-                              't': cname, 'p': ''})
-        info = {'title': cname, 'plot': u'Direct %s (DaddyLive)' % cname}
-        addDir(u'[B][COLOR gold]%s[/COLOR][/B]' % cname, payload,
-               'site_streams', ICON, cname, True, infoLabels=info)
-        shown += 1
-    if not shown:
-        control.infoDialog(u"[COLOR gold]Aucune chaîne française trouvée.[/COLOR]",
-                           NAME, ICON, 5000)
-    xbmcplugin.setContent(_handle, 'movies')
-    xbmcplugin.endOfDirectory(_handle)
-
-
 def site_play(payload):
     d = json.loads(payload)
-    site = SITES[d['k']]
     title = d.get('t') or NAME
     poster = d.get('p') or ICON
     Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
     if d['k'] == site_daddylive.KEY:
-        # v3.6.2 — drapeau f=1 : « lien (repli) » -> résolution playlist-token
-        result = site.resolve(d['u'], prefer_fallback=bool(d.get('f')))
+        # v3.6.3 — liens watch.php de la grille (menu Événements) : le module
+        # DaddyLive résout (_econfig ; playlist-token si « (repli) » f=1)
+        result = site_daddylive.resolve(d['u'], prefer_fallback=bool(d.get('f')))
+        site_ua = site_daddylive.UA
     else:
+        site = SITES[d['k']]
         result = site.resolve(d['u'])
+        site_ua = site.UA
     if not result:
         raise Exception('could not resolve stream for ' + d['u'])
     # resolve() normally returns just the m3u8 string; sites that chain
@@ -1185,7 +1181,7 @@ def site_play(payload):
     # for Referer/Origin.
     flink, referer_url = result if isinstance(result, tuple) else (result, d['u'])
     origin = '{uri.scheme}://{uri.netloc}'.format(uri=urlparse(referer_url))
-    stream_headers = {'Referer': origin + '/', 'Origin': origin, 'User-Agent': site.UA}
+    stream_headers = {'Referer': origin + '/', 'Origin': origin, 'User-Agent': site_ua}
     # installed inputstream.ffmpegdirect (21.3.8) does not whitelist a
     # stream_headers listitem property -- its addon.xml listitemprops=
     # "...default_url|is_realtime_stream|..." has no headers entry, so
@@ -1268,8 +1264,6 @@ def router(paramstring):
             site_streams_menu(params['url'])
         elif params['mode'] == 'site_play':
             site_play(params['url'])
-        elif params['mode'] == 'dlhd_247':
-            dlhd_247_menu()
     else:
         Main_menu()
 
