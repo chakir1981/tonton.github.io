@@ -89,7 +89,7 @@ def log_error(msg):
 
 
 def Main_menu():
-    # v2.0.5 — add-on recentré : seule la rubrique « ÉVÉNEMENTS EN DIRECT »
+    # v3.1.0 — add-on recentré : seule la rubrique « ÉVÉNEMENTS EN DIRECT »
     # (affichée en blanc) est conservée au menu. Les rubriques bleues
     # « Événements en direct » (doublon embedlivesports), « Football Libre »
     # et « Football Libre MOV » ne sont plus proposées (les modules et les
