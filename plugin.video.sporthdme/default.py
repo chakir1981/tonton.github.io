@@ -234,7 +234,7 @@ def get_events(url):  # 5
 
         event = u"{} vs {}".format(team1, team2) if team1 and team2 else team1
 
-        duration_in_ms = match['duration'] * 60 * 1000
+        duration_in_ms = _dur
 
         is_live = False
         if compare <= now_time_in_ms <= compare + duration_in_ms:
@@ -299,7 +299,22 @@ def deduplicate_events(events):
 FRENCH_LANGS = ('fr', 'french', u'français', 'francais')
 FRENCH_NAME_RE = re.compile(
     r'\bfr\b|\[fr\]|\(fr\)|french|fran[cç]ais|\bfrance\b|canal\+\s*foot|rmc\s*sport|'
-    r'quipe|tf1\b|\bm6\b|\bw9\b|\btmc\b|ligue1')
+    r'quipe|tf1\b|\bm6\b|\bw9\b|\btmc\b|ligue1|canal\+\s*(?:sport\s*)?360|'
+    r'canal\+\s*formula|canal\+\s*motogp')
+
+# Chaînes TV françaises du guide footao (le guide ne liste que des
+# diffusions France) : Canal+/beIN/RMC/Ligue 1+/Eurosport/TF1/M6/W9/TMC/TFX,
+# y compris les déclinaisons sans flux premium (« Canal+ Live 4 », « Ligue 1+
+# add. 3 ») — elles déclenchent le filtrage français strict de v3.5.4.
+_GUIDE_FR_RE = re.compile(
+    r'canal\+|bein|rmc|ligue\s?1\+|quipe|eurosport|tf1\b|\bm6\b|\bw9\b|\btmc\b|\btfx\b|'
+    r'france\s?(?:tv|[2345])', re.I)
+
+# Plateformes : le guide les annonce mais leurs seuls flux (grille
+# Daddylive) sont étrangers (DAZN Italie pour la Serie A…) — ce sont les
+# VRAIS liens du match, le filtre français strict ne s'applique pas.
+_GUIDE_PLATFORM_RE = re.compile(
+    r'dazn|\bapple\b|youtube|disney|prime|netflix|amazon', re.I)
 
 
 def _french_only():
@@ -439,6 +454,23 @@ def _is_french_source(name, lang):
     return bool(name_s and FRENCH_NAME_RE.search(name_s))
 
 
+def _guide_french(chan_hint, dlch_key):
+    """Diffusion sur une vraie chaîne TV française ? (filtre strict v3.5.4)
+
+    - libellé du guide clairement français (« Canal+ Live 4 », « Ligue 1+
+      add. 3 », « beIN SPORTS 1 »…) ;
+    - ou chaîne résoluble de la grille FR 24/7 (clé de dlch.CHANNELS).
+    Les plateformes (DAZN, Apple TV, YouTube, Disney+, Prime) renvoient
+    False : leurs seuls flux disponibles (ex. DAZN Italie) sont les bons
+    liens du match — on ne les supprime pas."""
+    if not chan_hint or _GUIDE_PLATFORM_RE.search(chan_hint):
+        return False
+    if _GUIDE_FR_RE.search(chan_hint):
+        return True
+    return bool(dlch_key) and dlch_mod is not None \
+        and dlch_key in getattr(dlch_mod, 'CHANNELS', {})
+
+
 def _db_channel(channel_name):
     """Cherche une chaîne par nom dans la base locale (channels.json)."""
     try:
@@ -491,6 +523,32 @@ def get_stream(name, url):  # 4
 
     import ast
     fr_only = _french_only()
+
+    # v3.5.4 — le guide footao sait si le match est réellement diffusé sur
+    # une chaîne TV française (Canal+, beIN, RMC, Ligue 1+, Canal+ Live…) :
+    # dans ce cas la liste de liens ne garde QUE les chaînes françaises
+    # (sources du site + grille Daddylive « … France »), même si le réglage
+    # « Uniquement les sources françaises » est désactivé. Si la grille
+    # n'a aucune chaîne France, le lien direct de la chaîne du guide et
+    # les liens FR 1/2/3 de la compétition prennent le relais — à la place
+    # des flux US/DE. Les plateformes (DAZN, Apple TV, YouTube, Disney+)
+    # ne déclenchent pas ce filtre : leurs seuls flux (ex. DAZN Italie
+    # pour la Serie A) sont les vrais liens du match.
+    _t1, _t2 = _event_teams(name)
+    _frow, _chan_hint = None, u''
+    if footao_mod is not None and _use_footao() and _t1:
+        _frow = footao_mod.find(_footao_rows(), _t1, _t2,
+                                _EVENT_DAYS.get(name, ''))
+        if _frow:
+            _chan_hint = (_frow.get('channel') or u'').strip()
+    _guide_ch = u''
+    if _frow is not None and footao_mod is not None:
+        try:
+            _guide_ch = footao_mod.channel_of(_frow) or u''
+        except Exception:
+            _guide_ch = u''
+    _fr_only_strict = _guide_french(_chan_hint, _guide_ch)
+
     sstreams = []
     for event in ast.literal_eval(data):
         if not isinstance(event, dict):  # TNT Sports 1
@@ -499,13 +557,13 @@ def get_stream(name, url):  # 4
             for chan, link, lang in datos:
                 chan = six.ensure_text(chan, encoding='utf-8', errors='replace')
                 lang = six.ensure_text(lang, encoding='utf-8', errors='replace')
-                if fr_only and not _is_french_source(chan, lang):
+                if (fr_only or _fr_only_strict) and not _is_french_source(chan, lang):
                     continue
                 chan = u'[COLOR gold]{}[/COLOR] - {}'.format(chan, lang)
                 sstreams.append((link, chan))
 
         else:
-            if fr_only and not _is_french_source(event.get('name'), event.get('language')):
+            if (fr_only or _fr_only_strict) and not _is_french_source(event.get('name'), event.get('language')):
                 continue
             link = event.get('links', [])
             lang = six.ensure_text(event.get('language', ''), encoding='utf-8', errors='replace')
@@ -520,24 +578,20 @@ def get_stream(name, url):  # 4
         #   1. le programme Daddylive du jour : la vraie chaîne qui porte ce
         #      match (DAZN Italie pour la Serie A, Ligue 1+ pour la Ligue 1…)
         #      avec son identifiant premium à résoudre — les canaux qui
-        #      correspondent à la chaîne du guide footao passent en tête ;
+        #      correspondent à la chaîne du guide footao passent en tête.
+        #      Quand le guide annonce une chaîne TV française (v3.5.4),
+        #      seules les chaînes « … France » de la grille sont gardées ;
         #   2. la chaîne du programme TV footao.tv quand elle est résoluble
         #      (beIN, Canal+, RMC, Ligue 1+…) ;
-        #   3. les chaînes habituelles de la compétition, uniquement pour les
-        #      matchs hors guide (jamais en plus d'une vraie diffusion :
-        #      fini les liens beIN qui n'ont rien à voir avec le match).
+        #   3. les liens FR 1/2/3 de la compétition : pour les matchs hors
+        #      guide, ou en secours d'une diffusion française sans flux
+        #      « France » dans la grille — jamais à la place d'une vraie
+        #      chaîne étrangère (DAZN Italie reste le bon lien d'un match
+        #      DAZN).
         # Quand le guide connaît une chaîne sans flux (Apple TV, YouTube,
-        # Disney+…), on prévient au lieu de proposer des liens qui ne
-        # diffuseront pas ce match (v3.5.2).
+        # DAZN sans grille…), on prévient au lieu de proposer des liens qui
+        # ne diffuseront pas ce match (v3.5.2).
         _ordered, _seen = [], set()      # (titre, url), clés 'premiumN'
-        _t1, _t2 = _event_teams(name)
-
-        _frow, _chan_hint = None, u''
-        if footao_mod is not None and _use_footao() and _t1:
-            _frow = footao_mod.find(_footao_rows(), _t1, _t2,
-                                    _EVENT_DAYS.get(name, ''))
-            if _frow:
-                _chan_hint = (_frow.get('channel') or u'').strip()
 
         _srow = None
         if dlsched_mod is not None and _t1:
@@ -545,8 +599,15 @@ def get_stream(name, url):  # 4
                 _srow = dlsched_mod.find(_dlsched_events(), _t1, _t2)
             except Exception as e:
                 log_info('dlsched find: {0!r}'.format(e))
+        _sched_fr = 0
         if _srow:
             _links = dlsched_mod.channel_links(_srow)
+            if _fr_only_strict:
+                # Diffusion française (guide) : uniquement les chaînes
+                # « … France » de la grille — les flux GB/DE/US disparaissent.
+                _links = [(_cn, _pid) for (_cn, _pid) in _links
+                          if _is_french_source(_cn, u'')]
+                _sched_fr = len(_links)
             _nh = re.sub(r'[^a-z0-9]+', u'', _chan_hint.lower())
             if _links and _nh:
                 # La chaîne du guide d'abord (ex. footao dit DAZN -> les
@@ -562,7 +623,7 @@ def get_stream(name, url):  # 4
                 _ordered.append((u'[COLOR gold]{0}[/COLOR]'.format(_cn),
                                  'dlch://' + _key))
 
-        if _frow and dlch_mod is not None:
+        if _frow is not None and dlch_mod is not None:
             _ch = footao_mod.channel_of(_frow)
             if _ch:
                 _pid, _logo = dlch_mod.CHANNELS.get(_ch, (u'', u''))
@@ -571,19 +632,38 @@ def get_stream(name, url):  # 4
                     _ordered.append((u'[COLOR gold]{0}[/COLOR] - FR'.format(_ch),
                                      'dlch://' + _pid))
         if not _ordered:
-            if _chan_hint:
-                # Le programme TV connaît la diffusion (DAZN, Ligue 1+,
-                # Apple TV, YouTube, Disney+…) mais ni le programme
-                # Daddylive du jour ni la grille FR n'offrent de flux pour
-                # cette chaîne : on prévient au lieu de proposer des liens
-                # qui ne diffuseront pas ce match.
+            if _chan_hint and not _fr_only_strict:
+                # Plateforme du guide (DAZN, Apple TV, YouTube, Disney+…)
+                # sans flux dans la grille : on prévient au lieu de proposer
+                # des liens qui ne diffuseront pas ce match (v3.5.2).
                 control.infoDialog(
                     u"[COLOR gold]Ce match est diffusé sur {0} : pas de flux disponible pour cette chaîne.[/COLOR]".format(_chan_hint),
                     NAME, ICON, 7000)
                 return
+            _sugg = dlch_mod.suggest(name) if dlch_mod is not None else []
+            if _sugg:
+                for _ch in _sugg:
+                    _pid, _logo = dlch_mod.CHANNELS[_ch]
+                    _ordered.append((u'[COLOR gold]{0}[/COLOR] - FR'.format(_ch),
+                                     'dlch://' + _pid))
+            elif _chan_hint:
+                # Chaîne TV française du guide (ex. « Canal+ Live 4 ») dont
+                # la grille du jour n'a aucun flux France.
+                control.infoDialog(
+                    u"[COLOR gold]Ce match est diffusé sur {0} : pas de flux disponible pour cette chaîne.[/COLOR]".format(_chan_hint),
+                    NAME, ICON, 7000)
+                return
+        elif _fr_only_strict and not _sched_fr:
+            # v3.5.4 : le guide annonce Canal+/beIN/RMC… mais la grille du
+            # jour n'a aucune chaîne France pour ce match. Le lien direct
+            # de la chaîne du guide est déjà là ; les liens FR 1/2/3 de la
+            # compétition le complètent — à la place des flux US/DE.
             if dlch_mod is not None:
                 for _ch in dlch_mod.suggest(name):
-                    _pid, _logo = dlch_mod.CHANNELS[_ch]
+                    _pid, _logo = dlch_mod.CHANNELS.get(_ch, (u'', u''))
+                    if not _pid or _pid in _seen:
+                        continue
+                    _seen.add(_pid)
                     _ordered.append((u'[COLOR gold]{0}[/COLOR] - FR'.format(_ch),
                                      'dlch://' + _pid))
         if _ordered:

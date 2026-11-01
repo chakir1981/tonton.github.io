@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.5.3" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.5.4" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -16,7 +16,12 @@
           <language>FR</language>
     <license>GNU GPL, version 2</license>
     <news>
-      [B]v3.5.3[/B] 01/11/2026
+      [B]v3.5.4[/B] 01/11/2026
+- [B]Chaînes françaises uniquement[/B] : quand le guide footao place le match sur une chaîne française (Canal+, beIN, RMC, Ligue 1+…), les flux GB/DE/US disparaissent de la liste — ne restent que les chaînes « France » du site et du programme Daddylive (ex. « Canal+ Foot France »).
+- [B]Liens français 1/2/3 à la place[/B] : si la grille du jour n'a aucune chaîne France pour un match diffusé sur Canal+, l'add-on propose la vraie chaîne du guide (lien direct) puis les liens FR de la compétition (ex. Premier League → RMC Sport 1/2) — fini les liens américains ou allemands à la place.
+- Les flux étrangers restent proposés uniquement pour les matchs SANS chaîne française (Serie A sur les canaux DAZN Italie…) : c'est la seule façon de les voir.
+- Les matchs en cours restent affichés jusqu'à la fin (en vert), comme demandé.
+[B]v3.5.3[/B] 01/11/2026
 - [B]De vrais liens pour DAZN et Ligue 1+[/B] : l'add-on lit désormais le [B]programme Daddylive du jour[/B] (la grille réelle, match par match) et propose les chaînes qui diffusent vraiment le match — ex. Lazio - Cagliari sur les canaux DAZN Italie, Ligue 1 sur [B]Ligue 1+ France[/B], au lieu des liens beIN génériques qui n'avaient rien à voir.
 - Nouveau module « Programme Daddylive » (réglage « domaines » dédié, activé par défaut) : matchs DAZN, Ligue 1+ et toutes les chaînes de la grille du jour ; dédoublonnage, canaux principaux d'abord.
 - « Ligue 1+ » devient une chaîne résoluble de la grille FR ; le message honnête reste pour les chaînes sans flux (Apple TV, YouTube, Disney+…).
