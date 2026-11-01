@@ -4,9 +4,10 @@
 Pour un match qui n'a aucune source française, ce module retrouve le match
 dans le programme TV français de footao.tv et indique LA chaîne qui le
 diffuse vraiment (au lieu de deviner par la compétition). La chaîne est
-ensuite résolue en flux par dlch.py (beIN, Canal+, RMC, TF1, M6…) ; les
-chaînes sans flux connu (DAZN, Ligue 1+, YouTube, Apple TV…) servent quand
-même à prouver la diffusion française (match laissé visible).
+ensuite résolue en flux par dlch.py (beIN, Canal+, RMC, TF1, M6, Ligue 1+…) ;
+les chaînes sans flux connu (DAZN, YouTube, Apple TV, Disney+…) servent
+quand même à prouver la diffusion française (match laissé visible) et le
+programme Daddylive du jour (dlsched.py) fournit alors les liens réels.
 
 Pages utilisées (HTML balisé schema.org/SportsEvent, sans anti-bot) :
     https://www.footao.tv/                       aujourd'hui
@@ -143,8 +144,10 @@ def find(rows, team1, team2, day=''):
 # chaîne footao -> chaîne résolvable par dlch --------------------------------
 
 # Libellés footao (alt des images) -> nom de chaîne de dlch.CHANNELS.
-# Les chaînes absentes d'ici (DAZN, Ligue 1+, Canal+ Live N, YouTube, Apple
-# TV, W9, France TV…) n'ont pas de flux premium connu : channel_of renvoie ''.
+# Les chaînes absentes d'ici (DAZN, Canal+ Live N, Ligue 1+ add. N, YouTube,
+# Apple TV, Disney+, W9, France TV…) n'ont pas de flux premium connu :
+# channel_of renvoie '' (le programme Daddylive du jour les couvre quand
+# une chaîne de sa grille porte le match).
 _CANON = (
     (r'^beIN SPORTS MAX (\d+)$', lambda m: u'beIN Sports MAX {0}'.format(m.group(1))),
     (r'^beIN SPORTS ([123])$', lambda m: u'beIN SPORTS {0}'.format(m.group(1))),
@@ -152,6 +155,7 @@ _CANON = (
     (r'^Canal\+ Sport$', u'Canal+ Sport'),
     (r'^Canal\+ Foot$', u'Canal+ Foot'),
     (r'^Canal\+$', u'Canal+'),
+    (r'^Ligue\s?1\+$', u'Ligue1+ France'),
     (r"^L'Equipe$", u"L'Équipe"),
     (r'^RMC Sport ([12])$', lambda m: u'RMC Sport {0}'.format(m.group(1))),
     (r'^Eurosport ([12])$', lambda m: u'Eurosport {0}'.format(m.group(1))),

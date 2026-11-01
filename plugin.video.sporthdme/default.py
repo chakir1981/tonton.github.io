@@ -22,6 +22,10 @@ try:
     from resources.modules import footao as footao_mod
 except ImportError:
     footao_mod = None
+try:
+    from resources.modules import dlsched as dlsched_mod
+except ImportError:
+    dlsched_mod = None
 import time
 from dateutil.parser import parse
 from dateutil.tz import gettz
@@ -315,6 +319,7 @@ def _use_footao():
 
 
 _FOOTAO_CACHE_FILE = 'footao_cache.json'
+_DLSCHED_CACHE_FILE = 'dlsched_cache.json'
 
 
 def _footao_rows():
@@ -334,6 +339,43 @@ def _footao_rows():
         return footao_mod.load(client, _cache) or []
     except Exception as e:
         log_info('footao: {0!r}'.format(e))
+        return []
+
+
+def _dl_sched_domains():
+    """Domaines du programme Daddylive (grille du jour) : réglage utilisateur
+    PUIS domaines par défaut du module — un réglage périmé ne doit jamais
+    bloquer la récupération du programme."""
+    try:
+        _s = ADDON.getSetting('dl_sched_domains') or dlsched_mod.DEFAULT_DOMAINS
+    except Exception:
+        _s = dlsched_mod.DEFAULT_DOMAINS
+    out = []
+    for d in (_s.split(',') + (dlsched_mod.DEFAULT_DOMAINS.split(',') if dlsched_mod is not None else [])):
+        d = d.strip()
+        if d and d not in out:
+            out.append(d)
+    return out
+
+
+def _dlsched_events():
+    """Programme Daddylive du jour (la vraie chaîne de chaque match : DAZN
+    Italie pour la Serie A, Ligue 1+ pour la Ligue 1…), cache disque ~30 min."""
+    if dlsched_mod is None:
+        return []
+    try:
+        import xbmcvfs
+        _tp = getattr(xbmcvfs, 'translatePath', None)
+        if _tp is None:
+            import xbmc as _xbmc
+            _tp = _xbmc.translatePath
+        _cache = _tp(ADDON_DATA + _DLSCHED_CACHE_FILE)
+    except Exception:
+        _cache = ''
+    try:
+        return dlsched_mod.load(client, _cache, _dl_sched_domains()) or []
+    except Exception as e:
+        log_info('dlsched: {0!r}'.format(e))
         return []
 
 
@@ -473,51 +515,84 @@ def get_stream(name, url):  # 4
                 sstreams.append((url_, chan))
 
     if len(sstreams) < 1:
-        # Matchs sans source FR sur le site : liens de secours = chaînes
-        # FR 24/7. La chaîne qui diffuse VRAIMENT le match d'abord (programme
-        # TV footao.tv), puis les chaînes habituelles de la compétition.
-        _ordered, _seen, _frow = [], set(), None
+        # Matchs sans source FR sur le site : les liens de secours sont,
+        # dans l'ordre —
+        #   1. le programme Daddylive du jour : la vraie chaîne qui porte ce
+        #      match (DAZN Italie pour la Serie A, Ligue 1+ pour la Ligue 1…)
+        #      avec son identifiant premium à résoudre — les canaux qui
+        #      correspondent à la chaîne du guide footao passent en tête ;
+        #   2. la chaîne du programme TV footao.tv quand elle est résoluble
+        #      (beIN, Canal+, RMC, Ligue 1+…) ;
+        #   3. les chaînes habituelles de la compétition, uniquement pour les
+        #      matchs hors guide (jamais en plus d'une vraie diffusion :
+        #      fini les liens beIN qui n'ont rien à voir avec le match).
+        # Quand le guide connaît une chaîne sans flux (Apple TV, YouTube,
+        # Disney+…), on prévient au lieu de proposer des liens qui ne
+        # diffuseront pas ce match (v3.5.2).
+        _ordered, _seen = [], set()      # (titre, url), clés 'premiumN'
         _t1, _t2 = _event_teams(name)
+
+        _frow, _chan_hint = None, u''
         if footao_mod is not None and _use_footao() and _t1:
             _frow = footao_mod.find(_footao_rows(), _t1, _t2,
                                     _EVENT_DAYS.get(name, ''))
             if _frow:
-                _ch = footao_mod.channel_of(_frow) if dlch_mod is not None else u''
-                if _frow.get('channel') and dlch_mod is not None and not _ch:
-                    # Le guide connaît la vraie diffusion (DAZN, Ligue 1+,
-                    # Apple TV, YouTube…) : ces chaînes n'ont pas de flux ici
-                    # et les chaînes FR 24/7 ne les remplacent pas — on
-                    # prévient au lieu de proposer des liens qui ne
-                    # diffuseront pas ce match.
-                    control.infoDialog(
-                        u"[COLOR gold]Ce match est diffusé sur {0} : pas de flux disponible pour cette chaîne.[/COLOR]".format((_frow.get('channel') or u'').strip()),
-                        NAME, ICON, 7000)
-                    return
-                if _ch:
-                    _ordered.append(_ch)
-                    _seen.add(_ch)
-        if dlch_mod is not None:
-            for _ch in dlch_mod.suggest(name):
-                if _ch not in _seen:
-                    _seen.add(_ch)
-                    _ordered.append(_ch)
+                _chan_hint = (_frow.get('channel') or u'').strip()
+
+        _srow = None
+        if dlsched_mod is not None and _t1:
+            try:
+                _srow = dlsched_mod.find(_dlsched_events(), _t1, _t2)
+            except Exception as e:
+                log_info('dlsched find: {0!r}'.format(e))
+        if _srow:
+            _links = dlsched_mod.channel_links(_srow)
+            _nh = re.sub(r'[^a-z0-9]+', u'', _chan_hint.lower())
+            if _links and _nh:
+                # La chaîne du guide d'abord (ex. footao dit DAZN -> les
+                # canaux DAZN du programme passent devant Paramount+…)
+                _links = sorted(
+                    _links,
+                    key=lambda l: 0 if _nh in re.sub(r'[^a-z0-9]+', u'', (l[0] or u'').lower()) else 1)
+            for _cn, _pid in _links:
+                _key = 'premium{0}'.format(_pid)
+                if _key in _seen:
+                    continue
+                _seen.add(_key)
+                _ordered.append((u'[COLOR gold]{0}[/COLOR]'.format(_cn),
+                                 'dlch://' + _key))
+
+        if _frow and dlch_mod is not None:
+            _ch = footao_mod.channel_of(_frow)
+            if _ch:
+                _pid, _logo = dlch_mod.CHANNELS.get(_ch, (u'', u''))
+                if _pid and _pid not in _seen:
+                    _seen.add(_pid)
+                    _ordered.append((u'[COLOR gold]{0}[/COLOR] - FR'.format(_ch),
+                                     'dlch://' + _pid))
+        if not _ordered:
+            if _chan_hint:
+                # Le programme TV connaît la diffusion (DAZN, Ligue 1+,
+                # Apple TV, YouTube, Disney+…) mais ni le programme
+                # Daddylive du jour ni la grille FR n'offrent de flux pour
+                # cette chaîne : on prévient au lieu de proposer des liens
+                # qui ne diffuseront pas ce match.
+                control.infoDialog(
+                    u"[COLOR gold]Ce match est diffusé sur {0} : pas de flux disponible pour cette chaîne.[/COLOR]".format(_chan_hint),
+                    NAME, ICON, 7000)
+                return
+            if dlch_mod is not None:
+                for _ch in dlch_mod.suggest(name):
+                    _pid, _logo = dlch_mod.CHANNELS[_ch]
+                    _ordered.append((u'[COLOR gold]{0}[/COLOR] - FR'.format(_ch),
+                                     'dlch://' + _pid))
         if _ordered:
-            for _ch in _ordered:
-                _pid, _logo = dlch_mod.CHANNELS[_ch]
-                _title = u'[COLOR gold]{0}[/COLOR] - FR'.format(_ch)
+            for _title, _u in _ordered[:6]:
                 info = {'title': _title, 'sorttitle': '', 'plot': name}
-                addDir(_title, 'dlch://' + _pid, 'play_stream', _logo or ICON, name,
+                addDir(_title, _u, 'play_stream', ICON, name,
                        isFolder=False, infoLabels=info)
             xbmcplugin.setContent(_handle, 'videos')
             xbmcplugin.endOfDirectory(_handle)
-            return
-        if _frow is not None:
-            # Le programme TV connaît la diffusion (DAZN, Ligue 1+, Apple TV,
-            # TFX…) mais aucun flux n'est disponible ici pour cette chaîne.
-            _lbl = _frow.get('channel') or u'?'
-            control.infoDialog(
-                u"[COLOR gold]Ce match est diffusé sur {0} : pas de flux disponible pour cette chaîne.[/COLOR]".format(_lbl),
-                NAME, ICON, 7000)
             return
         if fr_only:
             control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]\n"

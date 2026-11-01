@@ -43,7 +43,8 @@
 </addon>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.5.2" provider-name="chakir1981">
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.5.3" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -60,7 +61,11 @@
           <language>FR</language>
     <license>GNU GPL, version 2</license>
     <news>
-      [B]v3.5.2[/B] 01/11/2026
+      [B]v3.5.3[/B] 01/11/2026
+- [B]De vrais liens pour DAZN et Ligue 1+[/B] : l'add-on lit désormais le [B]programme Daddylive du jour[/B] (la grille réelle, match par match) et propose les chaînes qui diffusent vraiment le match — ex. Lazio - Cagliari sur les canaux DAZN Italie, Ligue 1 sur [B]Ligue 1+ France[/B], au lieu des liens beIN génériques qui n'avaient rien à voir.
+- Nouveau module « Programme Daddylive » (réglage « domaines » dédié, activé par défaut) : matchs DAZN, Ligue 1+ et toutes les chaînes de la grille du jour ; dédoublonnage, canaux principaux d'abord.
+- « Ligue 1+ » devient une chaîne résoluble de la grille FR ; le message honnête reste pour les chaînes sans flux (Apple TV, YouTube, Disney+…).
+[B]v3.5.2[/B] 01/11/2026
 - [B]Les matchs en cours restent affichés[/B] jusqu'à la fin du match (footao retire les matchs commencés de son site : l'add-on garde désormais en mémoire la grille du jour). Un match n'est retiré qu'une fois terminé (coup d'envoi + durée + 10 min), en vert tant qu'il est en cours.
 - [B]Fini les faux liens[/B] : quand le guide indique une chaîne sans flux (DAZN, Ligue 1+, Apple TV, YouTube…), l'add-on affiche « Ce match est diffusé sur DAZN : pas de flux disponible » au lieu de proposer des liens beIN/RMC qui ne diffuseraient pas le match.
 - Résolution des chaînes FR 24/7 fiabilisée : les domaines actuels de l'add-on sont toujours essayés en complément du réglage sauvegardé (un ancien réglage ne bloque plus), domaine mort retiré.
