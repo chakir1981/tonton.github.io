@@ -208,7 +208,10 @@ def get_events(url):  # 5
             channels.append({'channelName': u'%s (repli)' % label, 'language': 'fr',
                              'links': [dl_url], 'dl': 1, 'f': 1})
 
-        if fr_only and not (_channels_have_french(channels) or dl_links):
+        # v3.7.0 — règle stricte : le match doit être diffusé sur une vraie
+        # chaîne française du guide (avec son trio de liens un/deux/trois).
+        # Les entrées DaddyLive injectées ne qualifient plus un match.
+        if fr_only and not _channels_have_french_trio(channels):
             filtered_out += 1
             continue
 
@@ -330,6 +333,24 @@ def _channels_have_french(channels):
                 if _is_french_source(row.get('channelName'), row.get('language')):
                     return True
     return not identified
+
+
+def _channels_have_french_trio(channels):
+    """v3.7.0 — mode « sources françaises » strict : le match doit être
+    réellement diffusé sur une chaîne française DU GUIDE, et cette chaîne
+    doit fournir son trio de liens miroir (vertex.st / nexa.st / kora.st,
+    affichés « un / deux / trois » = 1 / 2 / 3). Un match sans chaîne FR
+    du guide mais seulement doublé d'une entrée DaddyLive (principale +
+    repli, ex. NFL Sunday Ticket sur un match NFL) n'afficherait que 2
+    liens : il reste masqué quand le réglage est actif."""
+    for ch in channels:
+        if not isinstance(ch, dict) or ch.get('dl'):
+            continue  # les entrées DaddyLive injectées ne qualifient pas
+        links = ch.get('links') or []
+        name = ch.get('channelName') or ch.get('name')
+        if len(links) >= 3 and _is_french_source(name, ch.get('language')):
+            return True
+    return False
 
 
 def _servers_have_french(servers):

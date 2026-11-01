@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.6.3" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.0" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -16,6 +16,10 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
+      [B]v3.7.0[/B] 02/11/2026
+- Réglage « Uniquement les sources françaises » devenu STRICT : seuls les matchs réellement diffusés sur une chaîne française du guide restent affichés, avec leurs 3 liens miroirs (un / deux / trois). Fini les faux positifs : un match sans chaîne FR du guide mais simplement doublé d'une entrée DaddyLive (ex. NFL Sunday Ticket sur Denver vs Kansas City) qui n'affichait que 2 liens est désormais masqué quand le réglage est actif.
+- Configuration distante : l'add-on lit un fichier de secours (sporthdme_remote.json) publié sur le site de l'add-on. Si les trois domaines DaddyLive intégrés tombent tous, les miroirs listés dans ce fichier sont essayés automatiquement — réparation possible en éditant un JSON, sans nouvelle version (cache 6 h, panneau réseau silencieux).
+- Le réglage désactivé (mode « toutes sources ») reste inchangé : liste complète du guide + liens DaddyLive/footao.
       [B]v3.6.3[/B] 02/11/2026
 - Retour au menu épuré de la 3.6.0 : une seule rubrique « ÉVÉNEMENTS EN DIRECT » — les deux rubriques DaddyLive dédiées de la 3.6.1 sont supprimées.
 - Les liens français arrivent DANS « ÉVÉNEMENTS EN DIRECT » : chaque match du guide gagne les chaînes FR de la grille DaddyLive qui le diffusent réellement (marquées « [DaddyLive] »), enrichies par footao.tv quand un 2e diffuseur existe (marqué « (footao) »), chacune doublée d'un lien « (repli) » qui force la résolution playlist-token si la voie _econfig tombe.

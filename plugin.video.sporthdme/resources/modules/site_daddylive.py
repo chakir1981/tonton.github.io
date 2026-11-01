@@ -77,6 +77,37 @@ UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
 
 # Domain order: primary + seeds that redirect to a live mirror.
 DOMAINS = ('https://thedaddy.pk', 'https://dlive.sx', 'https://dlhd.pk')
+
+# v3.7.0 — configuration distante : la liste des domaines DaddyLive de
+# secours est publiée sur le site GitHub Pages de l'addon. Si les trois
+# domaines intégrés tombent, l'addon essaie ceux du fichier distant
+# (cache 6 h) : on peut réparer l'add-on en éditant un JSON sur le dépôt,
+# sans republier de nouvelle version. Panne réseau -> [] silencieux.
+REMOTE_CFG_URL = 'https://chakir1981.github.io/tonton.github.io/sporthdme_remote.json'
+REMOTE_CFG_TTL = 6 * 3600
+_remote_cfg = {'ts': 0.0, 'domains': None}
+
+
+def remote_domains():
+    """Domaines de secours depuis sporthdme_remote.json (jamais de raise)."""
+    now = time.time()
+    if _remote_cfg['domains'] is not None and now - _remote_cfg['ts'] < REMOTE_CFG_TTL:
+        return _remote_cfg['domains']
+    doms = []
+    try:
+        txt, code = _get(REMOTE_CFG_URL, timeout=10)
+        if code == 200:
+            data = json.loads(txt)
+            for d in (data.get('domains') or []):
+                d = str(d).strip().rstrip('/')
+                if d.startswith('http') and d not in DOMAINS and d not in doms:
+                    doms.append(d)
+    except Exception:
+        doms = []
+    _remote_cfg['ts'] = now
+    _remote_cfg['domains'] = doms
+    return doms
+
 _domain = None          # working domain, remembered for the session
 
 MAX_EVENT_AGE_H = 6     # hide events that started more than 6h ago
@@ -298,11 +329,23 @@ def _get(url, referer=None, timeout=20):
 
 
 def _working_domain():
-    """Primary domain first, then seeds; remember what worked."""
+    """Primary domain first, then seeds, then the remote config's domains
+    (v3.7.0 : miroirs de secours publiés sur le GitHub Pages de l'addon,
+    modifiables sans nouvelle version). Remember what worked."""
     global _domain
     if _domain:
         return _domain
     for d in DOMAINS:
+        try:
+            txt, code = _get(d + '/index.php', timeout=15)
+            if code == 200 and 'schedule__event' in txt:
+                _domain = d.rstrip('/')
+                return _domain
+        except Exception:
+            continue
+    # v3.7.0 — domaines de secours du fichier distant (fetché seulement si
+    # les domaines intégrés ont tous échoué)
+    for d in remote_domains():
         try:
             txt, code = _get(d + '/index.php', timeout=15)
             if code == 200 and 'schedule__event' in txt:
