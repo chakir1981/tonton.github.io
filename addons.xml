@@ -41,7 +41,7 @@
         <platform>all</platform>
     </extension>
 </addon>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.4.0" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.5.0" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -58,7 +58,11 @@
           <language>FR</language>
     <license>GNU GPL, version 2</license>
     <news>
-      [B]v3.4.0[/B] 01/11/2026
+      [B]v3.5.0[/B] 01/11/2026
+- [B]Événements en direct = le guide TV français[/B] : la liste n'affiche plus [B]que les matchs que footao.tv et le programme TV sport Téléobs placent sur une chaîne française du jour[/B] (football + NFL, NBA, hockey, rugby, tennis…), quel que soit les réglages choisis. Fini les rencontres sans diffusion française.
+- [B]La vraie chaîne est écrite sous chaque match[/B] (Canal+, beIN SPORTS 2, DAZN, L'Équipe…), comme sur footao.tv — avant même d'ouvrir le match.
+- La liste se [B]met à jour immédiatement[/B] quand vous changez les options (plus de liste conservée en cache). Si les deux guides sont désactivés ou indisponibles, retour au filtrage « sources françaises » habituel.
+[B]v3.4.0[/B] 01/11/2026
 - [B]Programme TV sport Téléobs (tous sports)[/B] en complément de footao.tv : pour les matchs sans source française, la [B]vraie chaîne du jour[/B] remplace la supposition par compétition — NFL sur beIN 2/3 ou L’Équipe (et non beIN MAX deviné), NBA sur beIN 1, hockey, rugby, tennis… (beIN 1-3, Canal+ / Foot / Sport / Sport 360, Eurosport 1-2, L’Équipe, TF1, M6).
 - Si footao.tv connaît la diffusion mais sans flux (DAZN, Canal+ Live…), la chaîne TV résoluble du programme Téléobs est proposée à sa place quand elle existe.
 - Nouveau réglage on/off « Programme TV sport (Téléobs) » (activé par défaut) ; lecture du programme en 1 seule requête, cache 1 h.

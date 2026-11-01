@@ -74,11 +74,21 @@ _DROP = {'fc', 'cf', 'sc', 'ac', 'ud', 'cd', 'cp', 'bk', 'if', 'aif', 'sk', 'clu
          'afc', 'cfc', 'racing', 'atletico', 'sporting', 'de', 'the'}
 
 
+_TOK_CACHE = {}
+
+
 def _tokens(s):
+    """Jetons significatifs d'un nom d'équipe (mémoïsé : la même grille est
+    comparée à chaque match de la liste, inutile de re-tokeniser)."""
+    ts = _TOK_CACHE.get(s)
+    if ts is not None:
+        return ts
     s = unicodedata.normalize('NFKD', s or u'')
     s = u''.join(c for c in s if not unicodedata.combining(c)).lower()
     s = re.sub(r'[^a-z0-9 ]', u' ', s)
-    return [t for t in s.split() if t not in _DROP]
+    ts = [t for t in s.split() if t not in _DROP]
+    _TOK_CACHE[s] = ts
+    return ts
 
 
 def _tsim(a, b):

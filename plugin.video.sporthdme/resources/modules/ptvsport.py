@@ -106,11 +106,21 @@ _ALIAS = {u'napoli': u'naples', u'roma': u'rome', u'psg': u'paris',
           u'internazionale': u'inter', u'istasbul': u'istanbul'}
 
 
+_TOK_CACHE = {}
+
+
 def _tokens(s):
+    """Jetons significatifs d'un nom d'équipe (mémoïsé : la même grille est
+    comparée à chaque match de la liste, inutile de re-tokeniser)."""
+    ts = _TOK_CACHE.get(s)
+    if ts is not None:
+        return ts
     s = unicodedata.normalize('NFKD', s or u'')
     s = u''.join(c for c in s if not unicodedata.combining(c)).lower()
     s = re.sub(r'[^a-z0-9 ]', u' ', s)
-    return [t for t in s.split() if t not in _DROP]
+    ts = [t for t in s.split() if t not in _DROP]
+    _TOK_CACHE[s] = ts
+    return ts
 
 
 def _tsim(a, b):

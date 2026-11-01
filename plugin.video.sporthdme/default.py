@@ -155,8 +155,16 @@ def get_events(url):  # 5
         now_time_in_ms = datetime.now().timestamp() * 1000
     fr_only = _french_only()
     filtered_out = 0
-    _foot = None  # grille footao chargée à la demande (2 requêtes, cache 1 h)
-    _ptv = None   # programme TV sport Téléobs chargé à la demande (1 requête, cache 1 h)
+    # Vue « guide TV français » (v3.5.0) : tant que footao.tv et/ou le
+    # programme TV sport Téléobs renvoient des programmes, la liste
+    # n'affiche QUE les matchs que ces deux guides placent sur une chaîne
+    # française du jour — quel que soit les autres réglages. La vraie
+    # chaîne est écrite sous chaque match. Si les deux guides sont
+    # désactivés ou indisponibles, on revient au filtrage précédent
+    # (« sources françaises » + chaînes FR 24/7).
+    _foot = _footao_rows() if _use_footao() else []
+    _ptv = _ptv_rows() if _use_ptvsport() else []
+    guide_mode = bool(_foot or _ptv)
     for match in matches:
         channels = match.get("channels", [])
         sport = match.get('sport', '') or ''
@@ -182,28 +190,41 @@ def get_events(url):  # 5
                 compare = int('999999999999')
                 ftime = '-'
 
-        is_fr = _channels_have_french(channels)
-        if fr_only and not is_fr:
-            # Pas de chaîne FR sur le site : le match reste visible si les
-            # chaînes FR 24/7 (beIN, RMC, Canal+…) ou une diffusion française
-            # répertoriée par footao.tv / Téléobs peuvent le couvrir.
-            _hint = u' '.join(x for x in (sport, lname, team1, team2) if x)
-            _covered = (dlch_mod is not None and dlch_mod.has_suggestion(_hint))
-            if not _covered and footao_mod is not None and _use_footao() and team1:
-                if _foot is None:
-                    _foot = _footao_rows()
-                if _foot and footao_mod.find(_foot, team1, team2 or u'',
-                                             _event_day_ms(compare)):
-                    _covered = True
-            if not _covered and ptv_mod is not None and _use_ptvsport() and team1:
-                if _ptv is None:
-                    _ptv = _ptv_rows()
-                if _ptv and ptv_mod.find(_ptv, team1, team2 or u'',
-                                         _event_day_ms(compare)):
-                    _covered = True
-            if not _covered:
+        guide_chan = u''
+        if guide_mode:
+            # On ne garde que les matchs du guide TV français (même jour,
+            # rapprochement des équipes ≥ 0.7) : tout le reste est masqué.
+            _row = None
+            if team1:
+                if _foot:
+                    _row = footao_mod.find(_foot, team1, team2 or u'',
+                                           _event_day_ms(compare))
+                if _row is None and _ptv:
+                    _row = ptv_mod.find(_ptv, team1, team2 or u'',
+                                        _event_day_ms(compare))
+            if _row is None:
                 filtered_out += 1
                 continue
+            guide_chan = (_row.get('channel') or u'').strip()
+        else:
+            is_fr = _channels_have_french(channels)
+            if fr_only and not is_fr:
+                # Pas de chaîne FR sur le site : le match reste visible si les
+                # chaînes FR 24/7 (beIN, RMC, Canal+…) ou une diffusion française
+                # répertoriée par footao.tv / Téléobs peuvent le couvrir.
+                _hint = u' '.join(x for x in (sport, lname, team1, team2) if x)
+                _covered = (dlch_mod is not None and dlch_mod.has_suggestion(_hint))
+                if not _covered and footao_mod is not None and _foot and team1:
+                    if footao_mod.find(_foot, team1, team2 or u'',
+                                       _event_day_ms(compare)):
+                        _covered = True
+                if not _covered and ptv_mod is not None and _ptv and team1:
+                    if ptv_mod.find(_ptv, team1, team2 or u'',
+                                    _event_day_ms(compare)):
+                        _covered = True
+                if not _covered:
+                    filtered_out += 1
+                    continue
 
         event = u"{} vs {}".format(team1, team2) if team1 and team2 else team1
 
@@ -216,19 +237,28 @@ def get_events(url):  # 5
         m_color = "lime" if is_live else "gold"
         ftime = u'[COLOR cyan]{}[/COLOR]'.format(ftime)
         name = u'{0} [COLOR {1}]{2}[/COLOR] - [I]{3}[/I]'.format(ftime, m_color, event, lname)
-        # Priorité visuelle : les matchs avec sources françaises d'abord ;
-        # les autres (visibles grâce aux chaînes FR 24/7 / footao.tv) sont
-        # repoussés sous la liste avec un repère discret quand le filtre
-        # « sources françaises » est actif.
-        _prio = 0 if is_fr else 1
-        if _prio and fr_only:
-            name += u' - [I][COLOR grey]FR 24/7[/COLOR][/I]'
+        if guide_mode:
+            # La liste EST le guide TV français : la vraie chaîne du jour est
+            # écrite à la suite du match, avant même de l'ouvrir.
+            if guide_chan:
+                name += u' - [COLOR gold]{}[/COLOR]'.format(guide_chan)
+            _prio = 0  # tout est sur une chaîne FR : ordre chronologique
+        else:
+            # Priorité visuelle : les matchs avec sources françaises d'abord ;
+            # les autres (visibles grâce aux chaînes FR 24/7 / footao.tv) sont
+            # repoussés sous la liste avec un repère discret quand le filtre
+            # « sources françaises » est actif.
+            _prio = 0 if is_fr else 1
+            if _prio and fr_only:
+                name += u' - [I][COLOR grey]FR 24/7[/COLOR][/I]'
         _EVENT_DAYS[name] = _event_day_ms(compare)
         event_list.append([name, compare, channels, icon, _prio])
 
         # streams = str(quote(base64.b64encode(six.ensure_binary(str(streams)))))
     if not event_list:
-        if filtered_out:
+        if guide_mode:
+            control.infoDialog(u"[COLOR gold]Aucun match sur les chaînes françaises du jour (footao.tv / Téléobs).[/COLOR]", NAME, ICON, 6000)
+        elif filtered_out:
             control.infoDialog(u"[COLOR gold]Aucune source française parmi les matchs du moment.[/COLOR]", NAME, ICON, 6000)
         return
     events = sorted(event_list, key=lambda x: (x[4], x[1]))
@@ -239,7 +269,10 @@ def get_events(url):  # 5
         addDir(name, streams, 'get_streams', icon, FANART, isFolder=True)
 
     xbmcplugin.setContent(_handle, 'videos')
-    xbmcplugin.endOfDirectory(_handle)
+    # Liste vivante : jamais de cache disque. Changer une option (guides
+    # footao.tv / Téléobs, fuseau…) puis rouvrir « ÉVÉNEMENTS EN DIRECT »
+    # suffit pour voir la nouvelle liste.
+    xbmcplugin.endOfDirectory(_handle, cacheToDisc=False)
 
 
 def deduplicate_events(events):
