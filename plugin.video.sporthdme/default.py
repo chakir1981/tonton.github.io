@@ -14,25 +14,22 @@ import xbmcgui
 import xbmcplugin
 import requests
 from resources.modules import control, client
-try:
-    from resources.modules import dlch as dlch_mod
-except ImportError:
-    dlch_mod = None
-try:
-    from resources.modules import footao as footao_mod
-except ImportError:
-    footao_mod = None
-try:
-    from resources.modules import dlsched as dlsched_mod
-except ImportError:
-    dlsched_mod = None
+from resources.modules import site_embedlivesports
+from resources.modules import site_futbollibre
+from resources.modules import site_futbolmov
 import time
 from dateutil.parser import parse
 from dateutil.tz import gettz
 from dateutil import parser, tz
 
+# Extra sports sites: one self-contained module each. To add a site, drop a
+# module exposing NAME/KEY/list_events()/resolve() and append it here.
 # tvsport.guide is no longer a menu entry: it is the fallback schedule for
-# ÉVÉNEMENTS EN DIRECT (see Live_fallback_url).
+# ÉVÉNEMENTS EN DIRECT and Événements en direct (see Live_fallback_url).
+EXTRA_SITES = [site_embedlivesports, site_futbollibre]
+SITES = {s.KEY: s for s in EXTRA_SITES}
+# futbol-libre.mov: one main-menu entry -> its three lists (fmov_menu)
+SITES.update((s.KEY, s) for s in site_futbolmov.SUBSITES)
 
 _url = sys.argv[0]
 _handle = int(sys.argv[1])
@@ -94,6 +91,13 @@ def log_error(msg):
 def Main_menu():
     # addDir('[B][COLOR gold]Channels 24/7[/COLOR][/B]', 'https://1.livesoccer.sx/program.php', 14, ICON, FANART, '')
     addDir(u'[B][COLOR white]ÉVÉNEMENTS EN DIRECT[/COLOR][/B]', Live_url, 'events', ICON, FANART, True)
+    for _s in EXTRA_SITES:
+        addDir('[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(_s.NAME),
+               _s.KEY, 'site_events', ICON, FANART, True,
+               infoLabels={'title': _s.NAME, 'plot': getattr(_s, 'DESC', '')})
+    addDir('[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(site_futbolmov.NAME),
+           'fmov', 'fmov_menu', ICON, FANART, True,
+           infoLabels={'title': site_futbolmov.NAME, 'plot': site_futbolmov.DESC})
     # addDir('[B][COLOR gold]Alternative VIEW [/COLOR][/B]', '', '', ICON, FANART, '')
     # addDir('[B][COLOR gold]Alternative LIVE EVENTS[/COLOR][/B]', Alt_url, 15, ICON, FANART, '')
     # addDir('[B][COLOR white]SPORTS[/COLOR][/B]', '', 3, ICON, FANART, '')
@@ -119,11 +123,6 @@ def _matches_from_page(url):
     events = events[:-1].replace('self.__next_f.push(', '').replace('\\', '')
     old_pattern = r'"matches"\s*\:\s*(\[.+?])}]]}]n'
     return json.loads(re.findall(old_pattern, events.replace(',false', ''), re.DOTALL)[0])
-
-
-# Marge après la fin théorique (coup d'envoi + durée) avant de considérer
-# un match comme terminé et de le retirer de la liste.
-_ENDED_MARGIN_MS = 10 * 60 * 1000
 
 
 def get_events(url):  # 5
@@ -160,24 +159,22 @@ def get_events(url):  # 5
         now_time_in_ms = datetime.now().timestamp() * 1000
     fr_only = _french_only()
     filtered_out = 0
-    # Vue « guide TV français » (v3.5.0) : tant que footao.tv renvoie des
-    # programmes, la liste n'affiche QUE les matchs que ce guide place sur
-    # une chaîne française du jour — quel que soit les autres réglages. La
-    # vraie chaîne est écrite sous chaque match. Si le guide est désactivé
-    # ou indisponible, on revient au filtrage précédent
-    # (« sources françaises » + chaînes FR 24/7).
-    _foot = _footao_rows() if _use_footao() else []
-    guide_mode = bool(_foot)
     for match in matches:
         channels = match.get("channels", [])
-        sport = match.get('sport', '') or ''
+        if fr_only and not _channels_have_french(channels):
+            filtered_out += 1
+            continue
+        # links = match['additionalLinks']
+        # links.extend(match['channels'])
+        icon = match.get('team1Img', ICON)
+        sport = match.get('sport', '')
         lname = match.get('league', None)
         lname = six.ensure_text(lname, encoding='utf-8', errors='replace') if lname else sport
         team1 = match.get('team1', None)
         team1 = six.ensure_text(team1, encoding='utf-8', errors='replace') if team1 else None
         team2 = match.get('team2', None)
         team2 = six.ensure_text(team2, encoding='utf-8', errors='replace') if team2 else None
-        icon = match.get('team1Img', ICON)
+        event = u"{} vs {}".format(team1, team2) if team1 and team2 else team1
 
         try:
             compare = match['startTimestamp']
@@ -193,48 +190,7 @@ def get_events(url):  # 5
                 compare = int('999999999999')
                 ftime = '-'
 
-        # « Match fini » : coup d'envoi + durée + marge. Un match en cours
-        # reste affiché (en vert) — il n'est retiré qu'après sa fin, même si
-        # footao l'a déjà retiré de sa page du jour.
-        try:
-            _dur = int(match.get('duration', 105)) * 60 * 1000
-        except Exception:
-            _dur = 105 * 60 * 1000
-        if compare != 999999999999 and now_time_in_ms > compare + _dur + _ENDED_MARGIN_MS:
-            filtered_out += 1
-            continue
-
-        guide_chan = u''
-        if guide_mode:
-            # On ne garde que les matchs du guide TV français (même jour,
-            # rapprochement des équipes ≥ 0.7) : tout le reste est masqué.
-            _row = None
-            if team1 and _foot:
-                _row = footao_mod.find(_foot, team1, team2 or u'',
-                                       _event_day_ms(compare))
-            if _row is None:
-                filtered_out += 1
-                continue
-            guide_chan = (_row.get('channel') or u'').strip()
-        else:
-            is_fr = _channels_have_french(channels)
-            if fr_only and not is_fr:
-                # Pas de chaîne FR sur le site : le match reste visible si les
-                # chaînes FR 24/7 (beIN, RMC, Canal+…) ou une diffusion
-                # française répertoriée par footao.tv peuvent le couvrir.
-                _hint = u' '.join(x for x in (sport, lname, team1, team2) if x)
-                _covered = (dlch_mod is not None and dlch_mod.has_suggestion(_hint))
-                if not _covered and footao_mod is not None and _foot and team1:
-                    if footao_mod.find(_foot, team1, team2 or u'',
-                                       _event_day_ms(compare)):
-                        _covered = True
-                if not _covered:
-                    filtered_out += 1
-                    continue
-
-        event = u"{} vs {}".format(team1, team2) if team1 and team2 else team1
-
-        duration_in_ms = _dur
+        duration_in_ms = match['duration'] * 60 * 1000
 
         is_live = False
         if compare <= now_time_in_ms <= compare + duration_in_ms:
@@ -243,31 +199,14 @@ def get_events(url):  # 5
         m_color = "lime" if is_live else "gold"
         ftime = u'[COLOR cyan]{}[/COLOR]'.format(ftime)
         name = u'{0} [COLOR {1}]{2}[/COLOR] - [I]{3}[/I]'.format(ftime, m_color, event, lname)
-        if guide_mode:
-            # La liste EST le guide TV français : la vraie chaîne du jour est
-            # écrite à la suite du match, avant même de l'ouvrir.
-            if guide_chan:
-                name += u' - [COLOR gold]{}[/COLOR]'.format(guide_chan)
-            _prio = 0  # tout est sur une chaîne FR : ordre chronologique
-        else:
-            # Priorité visuelle : les matchs avec sources françaises d'abord ;
-            # les autres (visibles grâce aux chaînes FR 24/7 / footao.tv) sont
-            # repoussés sous la liste avec un repère discret quand le filtre
-            # « sources françaises » est actif.
-            _prio = 0 if is_fr else 1
-            if _prio and fr_only:
-                name += u' - [I][COLOR grey]FR 24/7[/COLOR][/I]'
-        _EVENT_DAYS[name] = _event_day_ms(compare)
-        event_list.append([name, compare, channels, icon, _prio])
+        event_list.append([name, compare, channels, icon])
 
         # streams = str(quote(base64.b64encode(six.ensure_binary(str(streams)))))
     if not event_list:
-        if guide_mode:
-            control.infoDialog(u"[COLOR gold]Aucun match sur les chaînes françaises du jour (footao.tv).[/COLOR]", NAME, ICON, 6000)
-        elif filtered_out:
+        if filtered_out:
             control.infoDialog(u"[COLOR gold]Aucune source française parmi les matchs du moment.[/COLOR]", NAME, ICON, 6000)
         return
-    events = sorted(event_list, key=lambda x: (x[4], x[1]))
+    events = sorted(event_list, key=lambda x: x[1])
     for event in deduplicate_events(events):
         streams = str(quote(base64.b64encode(six.ensure_binary(str(event[2])))))
         name = event[0]
@@ -275,10 +214,7 @@ def get_events(url):  # 5
         addDir(name, streams, 'get_streams', icon, FANART, isFolder=True)
 
     xbmcplugin.setContent(_handle, 'videos')
-    # Liste vivante : jamais de cache disque. Changer une option (guide
-    # footao.tv, fuseau…) puis rouvrir « ÉVÉNEMENTS EN DIRECT »
-    # suffit pour voir la nouvelle liste.
-    xbmcplugin.endOfDirectory(_handle, cacheToDisc=False)
+    xbmcplugin.endOfDirectory(_handle)
 
 
 def deduplicate_events(events):
@@ -299,22 +235,7 @@ def deduplicate_events(events):
 FRENCH_LANGS = ('fr', 'french', u'français', 'francais')
 FRENCH_NAME_RE = re.compile(
     r'\bfr\b|\[fr\]|\(fr\)|french|fran[cç]ais|\bfrance\b|canal\+\s*foot|rmc\s*sport|'
-    r'quipe|tf1\b|\bm6\b|\bw9\b|\btmc\b|ligue1|canal\+\s*(?:sport\s*)?360|'
-    r'canal\+\s*formula|canal\+\s*motogp')
-
-# Chaînes TV françaises du guide footao (le guide ne liste que des
-# diffusions France) : Canal+/beIN/RMC/Ligue 1+/Eurosport/TF1/M6/W9/TMC/TFX,
-# y compris les déclinaisons sans flux premium (« Canal+ Live 4 », « Ligue 1+
-# add. 3 ») — elles déclenchent le filtrage français strict de v3.5.4.
-_GUIDE_FR_RE = re.compile(
-    r'canal\+|bein|rmc|ligue\s?1\+|quipe|eurosport|tf1\b|\bm6\b|\bw9\b|\btmc\b|\btfx\b|'
-    r'france\s?(?:tv|[2345])', re.I)
-
-# Plateformes : le guide les annonce mais leurs seuls flux (grille
-# Daddylive) sont étrangers (DAZN Italie pour la Serie A…) — ce sont les
-# VRAIS liens du match, le filtre français strict ne s'applique pas.
-_GUIDE_PLATFORM_RE = re.compile(
-    r'dazn|\bapple\b|youtube|disney|prime|netflix|amazon', re.I)
+    r'quipe|tf1\b|\bm6\b|\bw9\b|\btmc\b|ligue1')
 
 
 def _french_only():
@@ -323,123 +244,6 @@ def _french_only():
         return (ADDON.getSetting('french_only') or 'true').lower() == 'true'
     except Exception:
         return True
-
-
-def _use_footao():
-    """Réglage « footao.tv : la vraie chaîne des matchs sans source FR »."""
-    try:
-        return (ADDON.getSetting('use_footao') or 'true').lower() == 'true'
-    except Exception:
-        return True
-
-
-_FOOTAO_CACHE_FILE = 'footao_cache.json'
-_DLSCHED_CACHE_FILE = 'dlsched_cache.json'
-
-
-def _footao_rows():
-    """Programme TV footao (aujourd'hui + demain), cache disque ~1 h."""
-    if footao_mod is None or not _use_footao():
-        return []
-    try:
-        import xbmcvfs
-        _tp = getattr(xbmcvfs, 'translatePath', None)
-        if _tp is None:
-            import xbmc as _xbmc
-            _tp = _xbmc.translatePath
-        _cache = _tp(ADDON_DATA + _FOOTAO_CACHE_FILE)
-    except Exception:
-        _cache = ''
-    try:
-        return footao_mod.load(client, _cache) or []
-    except Exception as e:
-        log_info('footao: {0!r}'.format(e))
-        return []
-
-
-def _dl_sched_domains():
-    """Domaines du programme Daddylive (grille du jour) : réglage utilisateur
-    PUIS domaines par défaut du module — un réglage périmé ne doit jamais
-    bloquer la récupération du programme."""
-    try:
-        _s = ADDON.getSetting('dl_sched_domains') or dlsched_mod.DEFAULT_DOMAINS
-    except Exception:
-        _s = dlsched_mod.DEFAULT_DOMAINS
-    out = []
-    for d in (_s.split(',') + (dlsched_mod.DEFAULT_DOMAINS.split(',') if dlsched_mod is not None else [])):
-        d = d.strip()
-        if d and d not in out:
-            out.append(d)
-    return out
-
-
-def _dlsched_events():
-    """Programme Daddylive du jour (la vraie chaîne de chaque match : DAZN
-    Italie pour la Serie A, Ligue 1+ pour la Ligue 1…), cache disque ~30 min."""
-    if dlsched_mod is None:
-        return []
-    try:
-        import xbmcvfs
-        _tp = getattr(xbmcvfs, 'translatePath', None)
-        if _tp is None:
-            import xbmc as _xbmc
-            _tp = _xbmc.translatePath
-        _cache = _tp(ADDON_DATA + _DLSCHED_CACHE_FILE)
-    except Exception:
-        _cache = ''
-    try:
-        return dlsched_mod.load(client, _cache, _dl_sched_domains()) or []
-    except Exception as e:
-        log_info('dlsched: {0!r}'.format(e))
-        return []
-
-
-# Jour (AAAA-MM-JJ) de chaque événement affiché, mémorisé à la construction
-# de la liste : au clic, sert à prioriser le match footao du même jour
-# (clef = libellé complet de l'élément).
-_EVENT_DAYS = {}
-
-
-def _event_day_ms(ms):
-    try:
-        return time.strftime('%Y-%m-%d', time.localtime(int(ms) / 1000.0))
-    except Exception:
-        return ''
-
-
-def _event_teams(label):
-    """Extrait (équipe1, équipe2) du libellé d'un événement.
-
-    Libellé : '[COLOR cyan]01-Nov, 17:30[/COLOR] [COLOR gold]T1 vs T2[/COLOR]
-    - [I]Ligue[/I]' -> ('T1', 'T2').
-    """
-    try:
-        txt = re.sub(r'\[[^\]]*\]', u'', label or u'')
-        txt = six.ensure_text(txt, encoding='utf-8', errors='replace').strip()
-        txt = re.sub(r'^\d{1,2}-\w{3},\s*\d{1,2}:\d{2}\s*', u'', txt)
-        head = txt.split(u' - ')[0].strip()
-        if u' vs ' in head:
-            _t1, _t2 = head.split(u' vs ', 1)
-            return _t1.strip(), _t2.strip()
-        return head, u''
-    except Exception:
-        return u'', u''
-
-
-def _dl_domain_list():
-    """Domaines Daddylive à essayer : réglage utilisateur PUIS domaines
-    actuels de l'add-on — un ancien réglage sauvegardé ne doit jamais
-    bloquer la résolution si les domaines intégrés fonctionnent."""
-    try:
-        _s = ADDON.getSetting('dl_domains') or dlch_mod.DEFAULT_DOMAINS
-    except Exception:
-        _s = dlch_mod.DEFAULT_DOMAINS
-    out = []
-    for d in (_s.split(',') + (dlch_mod.DEFAULT_DOMAINS.split(',') if dlch_mod is not None else [])):
-        d = d.strip()
-        if d and d not in out:
-            out.append(d)
-    return out
 
 
 def _is_french_source(name, lang):
@@ -452,23 +256,6 @@ def _is_french_source(name, lang):
     if lang_s in FRENCH_LANGS:
         return True
     return bool(name_s and FRENCH_NAME_RE.search(name_s))
-
-
-def _guide_french(chan_hint, dlch_key):
-    """Diffusion sur une vraie chaîne TV française ? (filtre strict v3.5.4)
-
-    - libellé du guide clairement français (« Canal+ Live 4 », « Ligue 1+
-      add. 3 », « beIN SPORTS 1 »…) ;
-    - ou chaîne résoluble de la grille FR 24/7 (clé de dlch.CHANNELS).
-    Les plateformes (DAZN, Apple TV, YouTube, Disney+, Prime) renvoient
-    False : leurs seuls flux disponibles (ex. DAZN Italie) sont les bons
-    liens du match — on ne les supprime pas."""
-    if not chan_hint or _GUIDE_PLATFORM_RE.search(chan_hint):
-        return False
-    if _GUIDE_FR_RE.search(chan_hint):
-        return True
-    return bool(dlch_key) and dlch_mod is not None \
-        and dlch_key in getattr(dlch_mod, 'CHANNELS', {})
 
 
 def _db_channel(channel_name):
@@ -502,6 +289,21 @@ def _channels_have_french(channels):
     return not identified
 
 
+def _servers_have_french(servers):
+    """True si au moins un serveur (sites annexes) est en français."""
+    for srv in servers or []:
+        if isinstance(srv, dict):
+            if _is_french_source(srv.get('name'), srv.get('language')):
+                return True
+        elif isinstance(srv, (list, tuple)) and srv:
+            if _is_french_source(srv[0], ''):
+                return True
+        elif isinstance(srv, six.string_types):
+            if _is_french_source(srv, ''):
+                return True
+    return False
+
+
 # Les trois miroirs du service principal sont affichés discrètement
 # « un », « deux », « trois » au lieu des domaines réels.
 _MIRROR_LABELS = ((r'vertex\.st', u'un'), (r'nexa\.st', u'deux'), (r'kora\.st', u'trois'))
@@ -523,32 +325,6 @@ def get_stream(name, url):  # 4
 
     import ast
     fr_only = _french_only()
-
-    # v3.5.4 — le guide footao sait si le match est réellement diffusé sur
-    # une chaîne TV française (Canal+, beIN, RMC, Ligue 1+, Canal+ Live…) :
-    # dans ce cas la liste de liens ne garde QUE les chaînes françaises
-    # (sources du site + grille Daddylive « … France »), même si le réglage
-    # « Uniquement les sources françaises » est désactivé. Si la grille
-    # n'a aucune chaîne France, le lien direct de la chaîne du guide et
-    # les liens FR 1/2/3 de la compétition prennent le relais — à la place
-    # des flux US/DE. Les plateformes (DAZN, Apple TV, YouTube, Disney+)
-    # ne déclenchent pas ce filtre : leurs seuls flux (ex. DAZN Italie
-    # pour la Serie A) sont les vrais liens du match.
-    _t1, _t2 = _event_teams(name)
-    _frow, _chan_hint = None, u''
-    if footao_mod is not None and _use_footao() and _t1:
-        _frow = footao_mod.find(_footao_rows(), _t1, _t2,
-                                _EVENT_DAYS.get(name, ''))
-        if _frow:
-            _chan_hint = (_frow.get('channel') or u'').strip()
-    _guide_ch = u''
-    if _frow is not None and footao_mod is not None:
-        try:
-            _guide_ch = footao_mod.channel_of(_frow) or u''
-        except Exception:
-            _guide_ch = u''
-    _fr_only_strict = _guide_french(_chan_hint, _guide_ch)
-
     sstreams = []
     for event in ast.literal_eval(data):
         if not isinstance(event, dict):  # TNT Sports 1
@@ -557,13 +333,13 @@ def get_stream(name, url):  # 4
             for chan, link, lang in datos:
                 chan = six.ensure_text(chan, encoding='utf-8', errors='replace')
                 lang = six.ensure_text(lang, encoding='utf-8', errors='replace')
-                if (fr_only or _fr_only_strict) and not _is_french_source(chan, lang):
+                if fr_only and not _is_french_source(chan, lang):
                     continue
                 chan = u'[COLOR gold]{}[/COLOR] - {}'.format(chan, lang)
                 sstreams.append((link, chan))
 
         else:
-            if (fr_only or _fr_only_strict) and not _is_french_source(event.get('name'), event.get('language')):
+            if fr_only and not _is_french_source(event.get('name'), event.get('language')):
                 continue
             link = event.get('links', [])
             lang = six.ensure_text(event.get('language', ''), encoding='utf-8', errors='replace')
@@ -573,107 +349,6 @@ def get_stream(name, url):  # 4
                 sstreams.append((url_, chan))
 
     if len(sstreams) < 1:
-        # Matchs sans source FR sur le site : les liens de secours sont,
-        # dans l'ordre —
-        #   1. le programme Daddylive du jour : la vraie chaîne qui porte ce
-        #      match (DAZN Italie pour la Serie A, Ligue 1+ pour la Ligue 1…)
-        #      avec son identifiant premium à résoudre — les canaux qui
-        #      correspondent à la chaîne du guide footao passent en tête.
-        #      Quand le guide annonce une chaîne TV française (v3.5.4),
-        #      seules les chaînes « … France » de la grille sont gardées ;
-        #   2. la chaîne du programme TV footao.tv quand elle est résoluble
-        #      (beIN, Canal+, RMC, Ligue 1+…) ;
-        #   3. les liens FR 1/2/3 de la compétition : pour les matchs hors
-        #      guide, ou en secours d'une diffusion française sans flux
-        #      « France » dans la grille — jamais à la place d'une vraie
-        #      chaîne étrangère (DAZN Italie reste le bon lien d'un match
-        #      DAZN).
-        # Quand le guide connaît une chaîne sans flux (Apple TV, YouTube,
-        # DAZN sans grille…), on prévient au lieu de proposer des liens qui
-        # ne diffuseront pas ce match (v3.5.2).
-        _ordered, _seen = [], set()      # (titre, url), clés 'premiumN'
-
-        _srow = None
-        if dlsched_mod is not None and _t1:
-            try:
-                _srow = dlsched_mod.find(_dlsched_events(), _t1, _t2)
-            except Exception as e:
-                log_info('dlsched find: {0!r}'.format(e))
-        _sched_fr = 0
-        if _srow:
-            _links = dlsched_mod.channel_links(_srow)
-            if _fr_only_strict:
-                # Diffusion française (guide) : uniquement les chaînes
-                # « … France » de la grille — les flux GB/DE/US disparaissent.
-                _links = [(_cn, _pid) for (_cn, _pid) in _links
-                          if _is_french_source(_cn, u'')]
-                _sched_fr = len(_links)
-            _nh = re.sub(r'[^a-z0-9]+', u'', _chan_hint.lower())
-            if _links and _nh:
-                # La chaîne du guide d'abord (ex. footao dit DAZN -> les
-                # canaux DAZN du programme passent devant Paramount+…)
-                _links = sorted(
-                    _links,
-                    key=lambda l: 0 if _nh in re.sub(r'[^a-z0-9]+', u'', (l[0] or u'').lower()) else 1)
-            for _cn, _pid in _links:
-                _key = 'premium{0}'.format(_pid)
-                if _key in _seen:
-                    continue
-                _seen.add(_key)
-                _ordered.append((u'[COLOR gold]{0}[/COLOR]'.format(_cn),
-                                 'dlch://' + _key))
-
-        if _frow is not None and dlch_mod is not None:
-            _ch = footao_mod.channel_of(_frow)
-            if _ch:
-                _pid, _logo = dlch_mod.CHANNELS.get(_ch, (u'', u''))
-                if _pid and _pid not in _seen:
-                    _seen.add(_pid)
-                    _ordered.append((u'[COLOR gold]{0}[/COLOR] - FR'.format(_ch),
-                                     'dlch://' + _pid))
-        if not _ordered:
-            if _chan_hint and not _fr_only_strict:
-                # Plateforme du guide (DAZN, Apple TV, YouTube, Disney+…)
-                # sans flux dans la grille : on prévient au lieu de proposer
-                # des liens qui ne diffuseront pas ce match (v3.5.2).
-                control.infoDialog(
-                    u"[COLOR gold]Ce match est diffusé sur {0} : pas de flux disponible pour cette chaîne.[/COLOR]".format(_chan_hint),
-                    NAME, ICON, 7000)
-                return
-            _sugg = dlch_mod.suggest(name) if dlch_mod is not None else []
-            if _sugg:
-                for _ch in _sugg:
-                    _pid, _logo = dlch_mod.CHANNELS[_ch]
-                    _ordered.append((u'[COLOR gold]{0}[/COLOR] - FR'.format(_ch),
-                                     'dlch://' + _pid))
-            elif _chan_hint:
-                # Chaîne TV française du guide (ex. « Canal+ Live 4 ») dont
-                # la grille du jour n'a aucun flux France.
-                control.infoDialog(
-                    u"[COLOR gold]Ce match est diffusé sur {0} : pas de flux disponible pour cette chaîne.[/COLOR]".format(_chan_hint),
-                    NAME, ICON, 7000)
-                return
-        elif _fr_only_strict and not _sched_fr:
-            # v3.5.4 : le guide annonce Canal+/beIN/RMC… mais la grille du
-            # jour n'a aucune chaîne France pour ce match. Le lien direct
-            # de la chaîne du guide est déjà là ; les liens FR 1/2/3 de la
-            # compétition le complètent — à la place des flux US/DE.
-            if dlch_mod is not None:
-                for _ch in dlch_mod.suggest(name):
-                    _pid, _logo = dlch_mod.CHANNELS.get(_ch, (u'', u''))
-                    if not _pid or _pid in _seen:
-                        continue
-                    _seen.add(_pid)
-                    _ordered.append((u'[COLOR gold]{0}[/COLOR] - FR'.format(_ch),
-                                     'dlch://' + _pid))
-        if _ordered:
-            for _title, _u in _ordered[:6]:
-                info = {'title': _title, 'sorttitle': '', 'plot': name}
-                addDir(_title, _u, 'play_stream', ICON, name,
-                       isFolder=False, infoLabels=info)
-            xbmcplugin.setContent(_handle, 'videos')
-            xbmcplugin.endOfDirectory(_handle)
-            return
         if fr_only:
             control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]\n"
                                u"[COLOR lime]Réglage : « Uniquement les sources françaises » dans les paramètres.[/COLOR]",
@@ -714,28 +389,8 @@ def resolve2(name, url):
     # new_streams = ['//dabac']
     log_info('RESOLVE-URL: {0}'.format(url))
 
-    # NOUVELLE BRANCHE : chaînes FR 24/7 (dlch://premium{N}, grille Daddylive)
-    if url.startswith('dlch://'):
-        Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
-        if dlch_mod is None:
-            control.infoDialog(u'[COLOR red]Module chaînes FR indisponible.[/COLOR]', NAME, ICON, 5000)
-            return
-        try:
-            _dl_domains = _dl_domain_list()
-        except Exception:
-            _dl_domains = [d for d in dlch_mod.DEFAULT_DOMAINS.split(',') if d.strip()]
-        _res = dlch_mod.resolve(url[7:], _dl_domains, client)
-        if not _res:
-            control.infoDialog(u'[COLOR red]Chaîne momentanément indisponible.[/COLOR]\n'
-                               u'[COLOR gold]Mets à jour les domaines Daddylive dans les paramètres.[/COLOR]',
-                               NAME, ICON, 7000)
-            return
-        _flink, _dom = _res
-        stream_headers = {'Referer': 'https://{0}/'.format(_dom), 'Origin': 'https://{0}'.format(_dom),
-                          'User-Agent': dlch_mod.DL_UA, 'Connection': 'keep-alive'}
-        stream_url = xbmc_curl_encode(_flink, stream_headers)
     # NEW GLISCO/SANSAT BRANCH
-    elif '//glisco' in url or '//sansat' in url or 'vertex' in url or 'nexa' in url or 'kora.st' in url:
+    if '//glisco' in url or '//sansat' in url or 'vertex' in url or 'nexa' in url or 'kora.st' in url:
         Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
         chan_id = url.split('id=')[-1]
 
@@ -1303,11 +958,189 @@ def addDir(name, url, mode, iconimage, description, isFolder=True, infoLabels=No
     if infoLabels:
         liz.setInfo(type="Video", infoLabels=infoLabels)
     if not isFolder:
-        if mode == 'settings' or mode == 'version' or mode == 'clear' or mode == 'play_stream':
+        if mode == 'settings' or mode == 'version' or mode == 'clear' or mode == 'play_stream' or mode == 'site_play':
             isFolder = False
         else:
             liz.setProperty('IsPlayable', 'true')
     xbmcplugin.addDirectoryItem(_handle, url=u, listitem=liz, isFolder=isFolder)
+
+
+def site_events_menu(key):
+    site = SITES[key]
+    try:
+        events = site.list_events()
+    except Exception as e:
+        log_info('site {0} failed: {1!r}'.format(key, e))
+        events = []
+    if not events and key == site_embedlivesports.KEY:
+        # streamx-hd down / empty agenda: futbollibrefullhd.org agenda instead,
+        # resolved by the Futbol Libre module (same embed family)
+        try:
+            events = site_futbollibre.list_diaries()
+        except Exception as e:
+            log_info('emls fallback failed: {0!r}'.format(e))
+        key = site_futbollibre.KEY
+    fr_only = _french_only()
+    shown = 0
+    for e in events:
+        if fr_only and e.get('servers') and not _servers_have_french(e.get('servers')):
+            continue
+        _add_site_event(key, site, e)
+        shown += 1
+    if events and not shown:
+        control.infoDialog(u"[COLOR gold]Aucune source française parmi les matchs de ce site.[/COLOR]", NAME, ICON, 6000)
+    xbmcplugin.setContent(_handle, 'movies')
+    xbmcplugin.endOfDirectory(_handle)
+
+
+def _add_site_event(key, site, e):
+    # title colour signals state: cyan = live, gold = upcoming, grey = finished.
+    colors = {'live': 'cyan', 'soon': 'gold', 'done': 'grey'}
+    t = time_convert(e['start_ms']) if e['start_ms'] else u'-'
+    # event titles carry accents/ñ (España, Brasil...) -> keep every piece
+    # unicode so the byte-str .format() can't fall back to the ascii codec.
+    tag = six.ensure_text(e.get('code') or e.get('league') or '',
+                          encoding='utf-8', errors='replace')  # country code, else league
+    title = six.ensure_text(e['title'], encoding='utf-8', errors='replace')
+    cc = u'[COLOR orange][{0}][/COLOR] '.format(tag) if tag else u''
+    if getattr(site, 'TAG_LAST', False):  # time + title first, league/sport tag at the end
+        label = u'[COLOR cyan]{0}[/COLOR] [COLOR {1}][B]{2}[/B][/COLOR]{3}'.format(
+            t, colors.get(e['status'], 'gold'), title, u' ' + cc.rstrip() if cc else u'')
+    else:
+        label = u'{0}[COLOR cyan]{1}[/COLOR] [COLOR {2}][B]{3}[/B][/COLOR]'.format(
+            cc, t, colors.get(e['status'], 'gold'), title)
+    # carry the event's title + poster down the chain so the servers menu
+    # and the player show the match, not the generic SportHD art.
+    payload = json.dumps({'k': key, 's': e['servers'],
+                          't': e['title'], 'p': e['poster']})
+    addDir(label, payload, 'site_streams', e['poster'] or ICON, e['title'], True)
+
+
+def fmov_menu():
+    for s in site_futbolmov.SUBSITES:
+        addDir(u'[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(s.NAME), s.KEY,
+               'site_events', ICON, FANART, True,
+               infoLabels={'title': s.NAME, 'plot': s.DESC})
+    addDir(u'[B][COLOR gold]Rechercher[/COLOR][/B]', 'fmov', 'fmov_search', ICON, FANART, True,
+           infoLabels={'title': u'Rechercher', 'plot': u'Rechercher dans les trois listes (équipe, championnat…).'})
+    xbmcplugin.endOfDirectory(_handle)
+
+
+def fmov_search():
+    kb = xbmc.Keyboard('', u'Rechercher')
+    kb.doModal()
+    query = six.ensure_text(kb.getText(), encoding='utf-8', errors='replace').strip().lower() \
+        if kb.isConfirmed() else u''
+    if not query:
+        xbmcplugin.endOfDirectory(_handle, succeeded=False)
+        return
+    found = 0
+    for site in site_futbolmov.SUBSITES:
+        try:
+            events = site.list_events()
+        except Exception as e:
+            log_info('fmov search {0} failed: {1!r}'.format(site.KEY, e))
+            continue
+        for e in events:
+            hay = six.ensure_text(u'{0} {1}'.format(e['title'], e.get('league') or ''),
+                                  encoding='utf-8', errors='replace').lower()
+            if query in hay:
+                _add_site_event(site.KEY, site, e)
+                found += 1
+    if not found:
+        control.infoDialog(u'[COLOR red]Aucun résultat[/COLOR]', NAME, ICON, 4000)
+    xbmcplugin.setContent(_handle, 'movies')
+    xbmcplugin.endOfDirectory(_handle)
+
+
+def site_streams_menu(payload):
+    d = json.loads(payload)
+    poster = d.get('p') or ICON
+    title = d.get('t', '')
+    fr_only = _french_only()
+    shown = 0
+    for sname, surl in d['s']:
+        # server names carry accents too (e.g. "Señal 1") -- byte-str .format()
+        # on a unicode arg raises UnicodeEncodeError in py2, so keep it unicode.
+        sname = six.ensure_text(sname, encoding='utf-8', errors='replace')
+        if fr_only and not _is_french_source(sname, ''):
+            continue
+        info = {'title': u'{0} | {1}'.format(title, sname), 'plot': title}
+        addDir(u'[B]{0}[/B]'.format(sname),
+               json.dumps({'k': d['k'], 'u': surl, 't': title, 'p': d.get('p', '')}),
+               'site_play', poster, title, isFolder=False, infoLabels=info)
+        shown += 1
+    if not shown:
+        control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]", NAME, ICON, 6000)
+    xbmcplugin.setContent(_handle, 'videos')
+    xbmcplugin.endOfDirectory(_handle)
+
+
+def site_play(payload):
+    d = json.loads(payload)
+    site = SITES[d['k']]
+    title = d.get('t') or NAME
+    poster = d.get('p') or ICON
+    Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
+    result = site.resolve(d['u'])
+    if not result:
+        raise Exception('could not resolve stream for ' + d['u'])
+    # resolve() normally returns just the m3u8 string; sites that chain
+    # through intermediate hosts (e.g. futbollibre's tarjetarojita.xyz
+    # wrapper) return (m3u8, final_page_url) since the CDN token's own
+    # host, not the originally-clicked link, is what the player needs
+    # for Referer/Origin.
+    flink, referer_url = result if isinstance(result, tuple) else (result, d['u'])
+    origin = '{uri.scheme}://{uri.netloc}'.format(uri=urlparse(referer_url))
+    stream_headers = {'Referer': origin + '/', 'Origin': origin, 'User-Agent': site.UA}
+    # installed inputstream.ffmpegdirect (21.3.8) does not whitelist a
+    # stream_headers listitem property -- its addon.xml listitemprops=
+    # "...default_url|is_realtime_stream|..." has no headers entry, so
+    # Kodi silently drops that property before the addon ever sees it
+    # and FFmpeg opens the URL with no User-Agent, which this CDN 403s.
+    # Embed the headers in the URL itself via Kodi's "url|key=val&..."
+    # pipe convention instead -- recognized by Kodi's ffmpeg build
+    # regardless of which inputstream addon is driving it.
+    stream_url = xbmc_curl_encode(flink, stream_headers)
+    liz = xbmcgui.ListItem(six.ensure_str(title, encoding='utf-8', errors='replace'))
+    liz.setArt({'icon': poster, 'thumb': poster, 'poster': poster, 'fanart': FANART})
+    liz.setInfo('video', {'title': title, 'plot': title})
+    liz.setProperty("IsPlayable", "true")
+    liz.setContentLookup(False)
+    liz.setMimeType('application/vnd.apple.mpegurl')
+    # live m3u8 via inputstream.ffmpegdirect: the plain FFmpeg HLS demuxer
+    # leaves a read-ahead thread that isn't cancelled on CloseFile() for
+    # live (non-EOF) streams, so Kodi blocks ~28s per pending segment
+    # request before it can close/switch. ffmpegdirect tears the stream
+    # down immediately instead. It doesn't exist for Kodi 18/Leia at all
+    # (dropped from addon.xml <requires> for that reason -- a hard
+    # dependency there would make the *whole* addon uninstallable on
+    # Leia), so check for it at runtime and fall back to the plain
+    # player -- with the old close-hang -- when it's missing.
+    if xbmc.getCondVisibility('System.HasAddon(inputstream.ffmpegdirect)'):
+        liz.setProperty('inputstream', 'inputstream.ffmpegdirect')
+        liz.setProperty('inputstream.ffmpegdirect.is_realtime_stream', 'true')
+        liz.setProperty('inputstream.ffmpegdirect.stream_mode', 'live')
+        liz.setProperty('inputstream.ffmpegdirect.manifest_type', 'hls')
+        # open_mode=curl routes I/O through Kodi's own CCurlFile instead
+        # of raw FFmpeg AVFormat. Some CDNs (seen on a futbollibre
+        # alt-server chained through tarjetarojita.xyz) silently
+        # blackhole FFmpeg's bundled TLS client for ~30s while an
+        # ordinary curl/requests call against the exact same URL and
+        # headers succeeds in well under a second -- a TLS/client-
+        # fingerprint block aimed at ffmpeg, not the headers.
+        # CCurlFile's TLS stack isn't flagged the same way.
+        # ...but curl mode only sends our headers with the playlist request:
+        # FFmpeg's HLS demuxer then fetches the segments itself without
+        # Referer/Origin, so CDNs that check them on every segment (the
+        # quotarevival.net player behind tarjetarojita: 403) never start.
+        # A resolver that returns its player page means "this CDN wants
+        # these headers" -> let FFmpeg open it, it passes them to segments.
+        liz.setProperty('inputstream.ffmpegdirect.open_mode',
+                        'ffmpeg' if isinstance(result, tuple) else 'curl')
+        liz.setProperty('inputstream.ffmpegdirect.default_url', stream_url)
+    liz.setPath(stream_url)
+    xbmc.Player().play(stream_url, liz, False)
 
 
 def router(paramstring):
@@ -1332,6 +1165,16 @@ def router(paramstring):
                                ICON, 5000)
         elif params['mode'] == 'version':
             xbmc.executebuiltin('UpdateAddonRepos')
+        elif params['mode'] == 'fmov_menu':
+            fmov_menu()
+        elif params['mode'] == 'fmov_search':
+            fmov_search()
+        elif params['mode'] == 'site_events':
+            site_events_menu(params['url'])
+        elif params['mode'] == 'site_streams':
+            site_streams_menu(params['url'])
+        elif params['mode'] == 'site_play':
+            site_play(params['url'])
     else:
         Main_menu()
 

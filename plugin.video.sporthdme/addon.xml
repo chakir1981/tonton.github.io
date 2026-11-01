@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.5.4" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="2.0.4" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -10,57 +10,17 @@
     <provides>video</provides>
   </extension>
   <extension point="xbmc.addon.metadata">
-    <summary lang="fr">SportHD par chakir1981</summary>
-    <description lang="fr">Flux sportifs de SportHD.me</description>
-    <disclaimer lang="fr">Tous les flux de cet add-on sont hébergés sur des sites tiers et mis en ligne par d'autres personnes. Nous ne sommes pas responsables des contenus hébergés sur ces sites tiers. En cas de problème juridique, veuillez contacter les propriétaires/hébergeurs vidéo concernés.</disclaimer>
-          <language>FR</language>
+    <summary lang="en">SportHD par chakir1981</summary>
+    <description lang="en">Flux sportifs de SportHD.me</description>
+    <disclaimer lang="en">Tous les flux de cet add-on sont hébergés sur des sites tiers et mis en ligne par d'autres personnes. Nous ne sommes pas responsables des contenus hébergés sur ces sites tiers. En cas de problème juridique, veuillez contacter les propriétaires/hébergeurs vidéo concernés.</disclaimer>
+          <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
-      [B]v3.5.4[/B] 01/11/2026
-- [B]Chaînes françaises uniquement[/B] : quand le guide footao place le match sur une chaîne française (Canal+, beIN, RMC, Ligue 1+…), les flux GB/DE/US disparaissent de la liste — ne restent que les chaînes « France » du site et du programme Daddylive (ex. « Canal+ Foot France »).
-- [B]Liens français 1/2/3 à la place[/B] : si la grille du jour n'a aucune chaîne France pour un match diffusé sur Canal+, l'add-on propose la vraie chaîne du guide (lien direct) puis les liens FR de la compétition (ex. Premier League → RMC Sport 1/2) — fini les liens américains ou allemands à la place.
-- Les flux étrangers restent proposés uniquement pour les matchs SANS chaîne française (Serie A sur les canaux DAZN Italie…) : c'est la seule façon de les voir.
-- Les matchs en cours restent affichés jusqu'à la fin (en vert), comme demandé.
-[B]v3.5.3[/B] 01/11/2026
-- [B]De vrais liens pour DAZN et Ligue 1+[/B] : l'add-on lit désormais le [B]programme Daddylive du jour[/B] (la grille réelle, match par match) et propose les chaînes qui diffusent vraiment le match — ex. Lazio - Cagliari sur les canaux DAZN Italie, Ligue 1 sur [B]Ligue 1+ France[/B], au lieu des liens beIN génériques qui n'avaient rien à voir.
-- Nouveau module « Programme Daddylive » (réglage « domaines » dédié, activé par défaut) : matchs DAZN, Ligue 1+ et toutes les chaînes de la grille du jour ; dédoublonnage, canaux principaux d'abord.
-- « Ligue 1+ » devient une chaîne résoluble de la grille FR ; le message honnête reste pour les chaînes sans flux (Apple TV, YouTube, Disney+…).
-[B]v3.5.2[/B] 01/11/2026
-- [B]Les matchs en cours restent affichés[/B] jusqu'à la fin du match (footao retire les matchs commencés de son site : l'add-on garde désormais en mémoire la grille du jour). Un match n'est retiré qu'une fois terminé (coup d'envoi + durée + 10 min), en vert tant qu'il est en cours.
-- [B]Fini les faux liens[/B] : quand le guide indique une chaîne sans flux (DAZN, Ligue 1+, Apple TV, YouTube…), l'add-on affiche « Ce match est diffusé sur DAZN : pas de flux disponible » au lieu de proposer des liens beIN/RMC qui ne diffuseraient pas le match.
-- Résolution des chaînes FR 24/7 fiabilisée : les domaines actuels de l'add-on sont toujours essayés en complément du réglage sauvegardé (un ancien réglage ne bloque plus), domaine mort retiré.
-[B]v3.5.1[/B] 01/11/2026
-- Le programme TV sport [B]Téléobs est retiré[/B] : le réglage « Programme TV sport (Téléobs) » disparaît et le guide TV français s'appuie uniquement sur [B]footao.tv[/B] (football). Le secours « sources françaises » et les liens de secours des matchs ne consultent plus que footao.tv.
-[B]v3.5.0[/B] 01/11/2026
-- [B]Événements en direct = le guide TV français[/B] : la liste n'affiche plus [B]que les matchs que footao.tv et le programme TV sport Téléobs placent sur une chaîne française du jour[/B] (football + NFL, NBA, hockey, rugby, tennis…), quel que soit les réglages choisis. Fini les rencontres sans diffusion française.
-- [B]La vraie chaîne est écrite sous chaque match[/B] (Canal+, beIN SPORTS 2, DAZN, L'Équipe…), comme sur footao.tv — avant même d'ouvrir le match.
-- La liste se [B]met à jour immédiatement[/B] quand vous changez les options (plus de liste conservée en cache). Si les deux guides sont désactivés ou indisponibles, retour au filtrage « sources françaises » habituel.
-[B]v3.4.0[/B] 01/11/2026
-- [B]Programme TV sport Téléobs (tous sports)[/B] en complément de footao.tv : pour les matchs sans source française, la [B]vraie chaîne du jour[/B] remplace la supposition par compétition — NFL sur beIN 2/3 ou L’Équipe (et non beIN MAX deviné), NBA sur beIN 1, hockey, rugby, tennis… (beIN 1-3, Canal+ / Foot / Sport / Sport 360, Eurosport 1-2, L’Équipe, TF1, M6).
-- Si footao.tv connaît la diffusion mais sans flux (DAZN, Canal+ Live…), la chaîne TV résoluble du programme Téléobs est proposée à sa place quand elle existe.
-- Nouveau réglage on/off « Programme TV sport (Téléobs) » (activé par défaut) ; lecture du programme en 1 seule requête, cache 1 h.
-[B]v3.3.0[/B] 01/11/2026
-- Le bon lien pour les matchs sans source française : l'add-on consulte désormais le [B]programme TV de footao.tv[/B] et propose [B]la chaîne qui diffuse vraiment le match[/B] (Liverpool - Arsenal sur Canal+ ? vous aurez Canal+, pas une supposition). En secours : les chaînes habituelles de la compétition, comme avant.
-- Les matchs [B]avec sources françaises passent en tête de liste[/B] ; les autres (couverts par les chaînes 24/7 ou footao) sont repoussés sous la liste avec un repère discret « FR 24/7 ».
-- M6 rejoint les chaînes FR 24/7 disponibles. Nouveau réglage on/off « footao.tv » (activé par défaut).
-[B]v3.2.0[/B] 01/11/2026
-- Add-on recentré sur l'essentiel : les rubriques « Événements en direct » (bleue), « Football Libre », « Football Libre MOV » et « Grille TV Sport » sont supprimées.
-- Le menu principal ne garde que [B]ÉVÉNEMENTS EN DIRECT[/B] (avec les chaînes sport françaises 24/7 en secours : beIN, RMC, Canal+…) et les réglages.
-[B]v3.1.0[/B] 01/11/2026
-- Les matchs sans source française ne sont plus des impasses : [B]l'add-on propose désormais les chaînes sport françaises 24/7[/B] (beIN Sports 1-3 + MAX 4-10, RMC Sport 1-2, Canal+ / Sport / Foot / Sport360 / F1 / MotoGP, Eurosport, Tennis+, TF1) selon la compétition détectée (Premier League → RMC Sport, Champions League → Canal+, Liga/Serie A → beIN…).
-- Ces liens de secours s'affichent dans le même style que les liens français ([COLOR gold]Chaîne[/COLOR] - FR) et fonctionnent même avec le réglage « Uniquement les sources françaises ».
-- Nouveau réglage « Chaînes FR 24/7 : domaines Daddylive » pour suivre la rotation des domaines de cet écosystème.
-[B]v3.0.1[/B] 01/11/2026
-- La fiche de l'add-on s'affiche désormais en français (langue FR, résumé, description et avertissement balisés français) — le champ « Langue : EN » a été corrigé.
-[B]v3.0.0[/B] 01/11/2026
-- Retour aux sources : version reconstruite sur la base 2.0.4 (Événements en direct, Football Libre, Football Libre MOV) — les parties Vavoo et LiveWatch sont entièrement supprimées.
-- Nouvelle rubrique [B]GRILLE TV SPORT (FR)[/B] : programmes en cours et à venir des chaînes sport françaises (beIN Sports 1-3 + MAX 4-10, Canal+ Foot/Sport/Sport 360 + Live 1-19, Ligue 1+, RMC Sport 1-4, DAZN, Eurosport, TNT) avec titres exacts des matchs, affiches et horaires.
-- Source grille : XMLTV FR (xmltvfr.fr), mise à jour quotidienne (~02:45), ~9 jours d'avance, cache local 24 h — aucune clé, aucun compte.
-[B]Historique 2.0.x[/B]
-- v2.0.4 : interface entièrement traduite en français (« Événements en direct », « Football Libre », « Football Libre MOV », sous-menus « Chaînes latino », « Sports USA », « Football en direct »), descriptions et repli « Serveur ».
+      [B]v2.0.4[/B] 01/11/2026
+- Interface entièrement traduite en français : « Événements en direct », « Football Libre », « Football Libre MOV », sous-menus « Chaînes latino », « Sports USA », « Football en direct », descriptions et repli « Serveur ».
 - v2.0.3 : l'add-on est publié au nom de chakir1981.
-- v2.0.2 : correction du cache d'images de Kodi — icône et fanart renommés (icon2.png / fanart2.jpg).
-- v2.0.1 : retour au menu classique ; réglage « Uniquement les sources françaises » (activé par défaut) ; serveurs affichés « un », « deux », « trois ».
+- v2.0.2 : correction du cache d'images de Kodi — les fichiers d'images sont renommés (icon2.png / fanart2.jpg) pour que le nouveau logo et le nouveau fanart s'affichent partout.
+- v2.0.1 : retour au menu classique (Événements en direct + sites annexes) ; réglage « Uniquement les sources françaises » dans les paramètres (activé par défaut) ; serveurs affichés « un », « deux », « trois ».
     </news>
 
     <assets>

@@ -1,10 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <settings>
     <category label="Réglages">
-        <setting id="use_footao" type="bool" label="footao.tv : n'afficher que les matchs de son guide (football) avec la vraie chaîne (recommandé)" default="true" />
-        <setting id="french_only" type="bool" label="N'afficher que les chaînes françaises (les matchs du guide sont toujours limités aux chaînes FR ; ce réglage filtre en plus les matchs hors guide)" default="true" />
+        <setting id="french_only" type="bool" label="Uniquement les sources françaises (masque les matchs sans chaîne FR)" default="true" />
         <setting id="timezone" label="Choisir le fuseau horaire" type="select" values="-12|-11|-10|-9|-8|-7|-6|-5|-4|-3|-2|-1|0|+1|+2|+3|+4|+5|+6|+7|+8|+9|+10|+11|+12" default="+3" sort="yes" />
-        <setting id="dl_domains" type="text" label="Chaînes FR 24/7 : domaines Daddylive, séparés par des virgules (à mettre à jour quand ils tournent)" default="dlhd.so,thedaddy.click" />
-        <setting id="dl_sched_domains" type="text" label="Programme Daddylive : domaines, séparés par des virgules (fournit les vraies chaînes du jour : DAZN, Ligue 1+…)" default="thedaddy.pk" />
     </category>
 </settings>
