@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.0.0" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.0.1" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -10,13 +10,15 @@
     <provides>video</provides>
   </extension>
   <extension point="xbmc.addon.metadata">
-    <summary lang="en">SportHD par chakir1981</summary>
-    <description lang="en">Flux sportifs de SportHD.me</description>
-    <disclaimer lang="en">Tous les flux de cet add-on sont hébergés sur des sites tiers et mis en ligne par d'autres personnes. Nous ne sommes pas responsables des contenus hébergés sur ces sites tiers. En cas de problème juridique, veuillez contacter les propriétaires/hébergeurs vidéo concernés.</disclaimer>
-          <language>EN</language>
+    <summary lang="fr">SportHD par chakir1981</summary>
+    <description lang="fr">Flux sportifs de SportHD.me</description>
+    <disclaimer lang="fr">Tous les flux de cet add-on sont hébergés sur des sites tiers et mis en ligne par d'autres personnes. Nous ne sommes pas responsables des contenus hébergés sur ces sites tiers. En cas de problème juridique, veuillez contacter les propriétaires/hébergeurs vidéo concernés.</disclaimer>
+          <language>FR</language>
     <license>GNU GPL, version 2</license>
     <news>
-      [B]v3.0.0[/B] 01/11/2026
+      [B]v3.0.1[/B] 01/11/2026
+- La fiche de l'add-on s'affiche désormais en français (langue FR, résumé, description et avertissement balisés français) — le champ « Langue : EN » a été corrigé.
+[B]v3.0.0[/B] 01/11/2026
 - Retour aux sources : version reconstruite sur la base 2.0.4 (Événements en direct, Football Libre, Football Libre MOV) — les parties Vavoo et LiveWatch sont entièrement supprimées.
 - Nouvelle rubrique [B]GRILLE TV SPORT (FR)[/B] : programmes en cours et à venir des chaînes sport françaises (beIN Sports 1-3 + MAX 4-10, Canal+ Foot/Sport/Sport 360 + Live 1-19, Ligue 1+, RMC Sport 1-4, DAZN, Eurosport, TNT) avec titres exacts des matchs, affiches et horaires.
 - Source grille : XMLTV FR (xmltvfr.fr), mise à jour quotidienne (~02:45), ~9 jours d'avance, cache local 24 h — aucune clé, aucun compte.
