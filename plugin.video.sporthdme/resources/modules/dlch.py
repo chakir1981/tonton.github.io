@@ -32,7 +32,7 @@ DL_UA = ('Mozilla/5.0 (iPhone; CPU iPhone OS 17_7 like Mac OS X) '
 
 # Domaines proposés par défaut (l'écosystème en publie des dizaines ; les
 # vivants changent souvent -> réglage « Chaînes FR 24/7 » dans l'add-on).
-DEFAULT_DOMAINS = 'dlhd.so,thedaddy.click,daddylive.mp'
+DEFAULT_DOMAINS = 'dlhd.so,thedaddy.click'
 
 _LOGOS = 'https://raw.githubusercontent.com/MarkMCFC/tfms.xyz/refs/heads/main/logos/'
 

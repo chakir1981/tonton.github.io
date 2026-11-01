@@ -42,7 +42,8 @@
     </extension>
 </addon>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.5.1" provider-name="chakir1981">
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.5.2" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -59,7 +60,11 @@
           <language>FR</language>
     <license>GNU GPL, version 2</license>
     <news>
-      [B]v3.5.1[/B] 01/11/2026
+      [B]v3.5.2[/B] 01/11/2026
+- [B]Les matchs en cours restent affichés[/B] jusqu'à la fin du match (footao retire les matchs commencés de son site : l'add-on garde désormais en mémoire la grille du jour). Un match n'est retiré qu'une fois terminé (coup d'envoi + durée + 10 min), en vert tant qu'il est en cours.
+- [B]Fini les faux liens[/B] : quand le guide indique une chaîne sans flux (DAZN, Ligue 1+, Apple TV, YouTube…), l'add-on affiche « Ce match est diffusé sur DAZN : pas de flux disponible » au lieu de proposer des liens beIN/RMC qui ne diffuseraient pas le match.
+- Résolution des chaînes FR 24/7 fiabilisée : les domaines actuels de l'add-on sont toujours essayés en complément du réglage sauvegardé (un ancien réglage ne bloque plus), domaine mort retiré.
+[B]v3.5.1[/B] 01/11/2026
 - Le programme TV sport [B]Téléobs est retiré[/B] : le réglage « Programme TV sport (Téléobs) » disparaît et le guide TV français s'appuie uniquement sur [B]footao.tv[/B] (football). Le secours « sources françaises » et les liens de secours des matchs ne consultent plus que footao.tv.
 [B]v3.5.0[/B] 01/11/2026
 - [B]Événements en direct = le guide TV français[/B] : la liste n'affiche plus [B]que les matchs que footao.tv et le programme TV sport Téléobs placent sur une chaîne française du jour[/B] (football + NFL, NBA, hockey, rugby, tennis…), quel que soit les réglages choisis. Fini les rencontres sans diffusion française.

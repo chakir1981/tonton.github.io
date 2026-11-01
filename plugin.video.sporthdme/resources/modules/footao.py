@@ -180,12 +180,18 @@ def _ensure_text(data):
 
 
 def load(client_mod, cache_path='', force=False):
-    """Grille footao (aujourd'hui + demain). Cache disque JSON ~1 h.
+    """Grille footao (aujourd'hui + demain) + journal du jour. Cache ~1 h.
+
+    footao retire les matchs commencés de sa page du jour ; le journal
+    conserve chaque grille déjà vue (fusion par jour, purgée des jours
+    passés) pour qu'un match en cours reste rattaché à sa chaîne tant
+    qu'il n'est pas terminé.
 
     client_mod : module client de l'add-on (méthode request) — injection
     pour rester testable. cache_path vide = pas de cache disque.
     """
     now = time.time()
+    doc = None
     if cache_path and not force:
         try:
             fh = open(cache_path, 'rb')
@@ -194,19 +200,46 @@ def load(client_mod, cache_path='', force=False):
             if now - float(doc.get('ts', 0)) < CACHE_AGE and doc.get('rows'):
                 return doc['rows']
         except Exception:
-            pass
-    rows = []
+            doc = None
+    fresh = []
     for url in (TODAY_URL, TOMORROW_URL):
         try:
-            rows += parse(_ensure_text(client_mod.request(url)))
+            fresh += parse(_ensure_text(client_mod.request(url)))
         except Exception:
             continue
+    journal = (doc or {}).get('journal') or {}
+    if fresh:
+        rows = _merge_journal(fresh, journal)
+    elif journal:
+        # pages momentanément indisponibles : resservir la grille connue
+        rows = [journal[d][k] for d in sorted(journal) for k in sorted(journal[d])]
+    else:
+        rows = []
     if rows and cache_path:
         try:
             fh = open(cache_path, 'wb')
-            fh.write(json.dumps({'ts': now, 'rows': rows},
+            fh.write(json.dumps({'ts': now, 'rows': rows, 'journal': journal},
                                 ensure_ascii=False).encode('utf-8'))
             fh.close()
         except Exception:
             pass
     return rows
+
+
+def _journal_key(r):
+    return u'|'.join((r['day'], r['hour'], r['t1'], r['t2']))
+
+
+def _merge_journal(fresh, journal):
+    """Fusionne les lignes fraîchement parsées dans le journal du jour
+    (une ligne déjà vue garde sa chaîne d'origine), purge les jours passés
+    et renvoie la liste plate triée par jour puis heure."""
+    today = time.strftime('%Y-%m-%d')
+    for r in fresh:
+        day = journal.setdefault(r['day'], {})
+        k = _journal_key(r)
+        if k not in day:
+            day[k] = r
+    for d in [x for x in journal if x < today]:
+        del journal[d]
+    return [journal[d][k] for d in sorted(journal) for k in sorted(journal[d])]

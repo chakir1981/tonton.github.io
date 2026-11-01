@@ -117,6 +117,11 @@ def _matches_from_page(url):
     return json.loads(re.findall(old_pattern, events.replace(',false', ''), re.DOTALL)[0])
 
 
+# Marge après la fin théorique (coup d'envoi + durée) avant de considérer
+# un match comme terminé et de le retirer de la liste.
+_ENDED_MARGIN_MS = 10 * 60 * 1000
+
+
 def get_events(url):  # 5
     matches = None
     if url != Live_fallback_url:
@@ -183,6 +188,17 @@ def get_events(url):  # 5
             except Exception:
                 compare = int('999999999999')
                 ftime = '-'
+
+        # « Match fini » : coup d'envoi + durée + marge. Un match en cours
+        # reste affiché (en vert) — il n'est retiré qu'après sa fin, même si
+        # footao l'a déjà retiré de sa page du jour.
+        try:
+            _dur = int(match.get('duration', 105)) * 60 * 1000
+        except Exception:
+            _dur = 105 * 60 * 1000
+        if compare != 999999999999 and now_time_in_ms > compare + _dur + _ENDED_MARGIN_MS:
+            filtered_out += 1
+            continue
 
         guide_chan = u''
         if guide_mode:
@@ -353,6 +369,22 @@ def _event_teams(label):
         return u'', u''
 
 
+def _dl_domain_list():
+    """Domaines Daddylive à essayer : réglage utilisateur PUIS domaines
+    actuels de l'add-on — un ancien réglage sauvegardé ne doit jamais
+    bloquer la résolution si les domaines intégrés fonctionnent."""
+    try:
+        _s = ADDON.getSetting('dl_domains') or dlch_mod.DEFAULT_DOMAINS
+    except Exception:
+        _s = dlch_mod.DEFAULT_DOMAINS
+    out = []
+    for d in (_s.split(',') + (dlch_mod.DEFAULT_DOMAINS.split(',') if dlch_mod is not None else [])):
+        d = d.strip()
+        if d and d not in out:
+            out.append(d)
+    return out
+
+
 def _is_french_source(name, lang):
     """True si la chaîne/le serveur est en français (code pays, langue ou nom)."""
     try:
@@ -450,8 +482,18 @@ def get_stream(name, url):  # 4
             _frow = footao_mod.find(_footao_rows(), _t1, _t2,
                                     _EVENT_DAYS.get(name, ''))
             if _frow:
-                _ch = footao_mod.channel_of(_frow)
-                if _ch and dlch_mod is not None and _ch in dlch_mod.CHANNELS:
+                _ch = footao_mod.channel_of(_frow) if dlch_mod is not None else u''
+                if _frow.get('channel') and dlch_mod is not None and not _ch:
+                    # Le guide connaît la vraie diffusion (DAZN, Ligue 1+,
+                    # Apple TV, YouTube…) : ces chaînes n'ont pas de flux ici
+                    # et les chaînes FR 24/7 ne les remplacent pas — on
+                    # prévient au lieu de proposer des liens qui ne
+                    # diffuseront pas ce match.
+                    control.infoDialog(
+                        u"[COLOR gold]Ce match est diffusé sur {0} : pas de flux disponible pour cette chaîne.[/COLOR]".format((_frow.get('channel') or u'').strip()),
+                        NAME, ICON, 7000)
+                    return
+                if _ch:
                     _ordered.append(_ch)
                     _seen.add(_ch)
         if dlch_mod is not None:
@@ -524,10 +566,9 @@ def resolve2(name, url):
             control.infoDialog(u'[COLOR red]Module chaînes FR indisponible.[/COLOR]', NAME, ICON, 5000)
             return
         try:
-            _dl_domains = ADDON.getSetting('dl_domains') or dlch_mod.DEFAULT_DOMAINS
+            _dl_domains = _dl_domain_list()
         except Exception:
-            _dl_domains = dlch_mod.DEFAULT_DOMAINS
-        _dl_domains = [d for d in _dl_domains.split(',') if d.strip()]
+            _dl_domains = [d for d in dlch_mod.DEFAULT_DOMAINS.split(',') if d.strip()]
         _res = dlch_mod.resolve(url[7:], _dl_domains, client)
         if not _res:
             control.infoDialog(u'[COLOR red]Chaîne momentanément indisponible.[/COLOR]\n'
