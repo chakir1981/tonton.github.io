@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.19" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.20" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -16,6 +16,10 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
+      [B]v3.7.20[/B] 03/11/2026
+- NOUVEAU MENU « CHAÎNES FR (24h/24) » : les chaînes françaises du guide (Canal+ Foot, Canal+ France…) sont désormais listées en permanence et jouables À TOUT MOMENT — ce sont des flux continus, pas seulement pendant un match (vérifié en direct : le flux répond même quand aucun de leurs matchs n'est en cours). La grille ne les affiche que pendant les matchs ; ce menu les affiche toujours, avec le même résolveur et son repli automatique sur les miroirs.
+- PARAMÈTRES ALLÉGÉS : la catégorie « Affichage » disparaît — « Langues dans le titre des matchs » est désormais TOUJOURS actif (FR en premier) et « Grouper les matchs par sport » est DÉSACTIVÉ en dur ; plus rien à régler, le comportement est fixé (un ancien réglage resté sur votre appareil est simplement ignoré).
+- MATCHS : aucun changement — mêmes matchs, mêmes liens d'origine du guide, toujours SANS aucun lien ajouté.
       [B]v3.7.19[/B] 03/11/2026
 - SUPPRESSION DE LA SOURCE BÉTA (à la demande de l'utilisateur) : la liste « MATCHS BÉTA » (SportOnline) disparaît entièrement — plus de menu, plus de badge [BÉTA], plus de réglage « BÉTA — Matchs SportOnline » dans Paramètres, plus aucun fichier de cette source ; un éventuel réglage BÉTA restant sur votre appareil est simplement ignoré.
 - « MATCHS » NE CHANGE PAS : mêmes matchs, mêmes liens d'origine du guide, langues dans le titre (FR seul quand « Uniquement les sources françaises » est actif), toujours SANS aucun lien ajouté.
