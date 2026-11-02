@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.13" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.14" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -16,6 +16,11 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
+      [B]v3.7.14[/B] 02/11/2026
+- BÉTA SPORTONLINE DANS LES ÉVÉNEMENTS EN DIRECT : quand le réglage « BÉTA — Source SportOnline » est activé, les matchs de la source BÉTA absents du guide (ex. Ligue 2 : Reims vs Sochaux, Red Star vs Nancy) apparaissent DANS LA LISTE HABITUELLE « ÉVÉNEMENTS EN DIRECT », au même format (heure cyan, équipes or, langues magenta FR en premier), avec un petit badge MAGENTA [BÉTA] en bout de ligne. Plus besoin d'ouvrir le menu « BÉTA — Matchs SportOnline » (qui reste disponible).
+- ZÉRO DOUBLON : un match déjà présent dans le guide habituel (mêmes équipes à ±20 min) ne s'affiche pas deux fois — seule la ligne BÉTA en plus apparaît quand le guide ne l'a pas. Le réglage « Uniquement les sources françaises » s'applique aussi aux matchs BÉTA.
+- GRILLE PLUS RAPIDE : la grille BÉTA est mise en cache 10 min ; si la source BÉTA est indisponible, la grille habituelle s'affiche normalement, sans erreur.
+- Toujours SANS aucun lien ajouté d'origine : la BÉTA n'apparaît que si tu l'actives dans Paramètres &gt; Réglages ; sans activation, la liste est exactement celle du guide habituel.
       [B]v3.7.13[/B] 02/11/2026
 - BÉTA SPORTONLINE — RÉSOLVEUR RENFORCÉ : le lien du lecteur (sous-domaine qui tourne à chaque chargement) est toujours frais à la demande ; si une page lecteur ne répond pas (403, lien expiré, coupure réseau), l'add-on recharge la page de la chaîne pour obtenir un lien NEUF et réessaie automatiquement (2 passes, référents alternés), et une erreur réseau ne fait plus planter la lecture.
 - RAPPEL ACTIVATION BÉTA (pour voir des matchs absents du guide habituel, ex. Reims vs Sochaux) : 1) mets l'add-on à jour, 2) Paramètres &gt; Réglages &gt; active « BÉTA — Source SportOnline », 3) retour au menu principal &gt; nouvelle entrée MAGENTA « BÉTA — Matchs SportOnline ». Sans activation, rien ne change (comportement 3.7.11 conservé).
