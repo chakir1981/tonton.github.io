@@ -62,7 +62,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.16" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.17" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -79,6 +79,12 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
+      [B]v3.7.17[/B] 03/11/2026
+- RETOUR DE LA SOURCE BÉTA (SportOnline), BIEN SÉPARÉE COMME DEMANDÉ : nouvelle entrée de menu « MATCHS BÉTA » en magenta, juste sous « MATCHS » — les deux listes ne se mélangent pas : la grille principale reste exactement celle d'origine, la BÉTA vit dans sa propre liste avec un badge [BÉTA] magenta sur chaque ligne.
+- CE QUE LA BÉTA APPORTE : la Ligue 2 et les matchs diffusés en français absents du guide (vérifié en direct : Reims – Sochaux, Red Star – Nancy), grille du jour + demain, heures UK converties en heure locale, et la langue de chaque chaîne DÉCLARÉE par la source (FR fiable).
+- NOUVEAU RÉGLAGE « Source BÉTA » dans Paramètres : « BÉTA — Matchs SportOnline » (activé par défaut) — un seul réglage pour afficher ou masquer toute la liste BÉTA ; le réglage « Uniquement les sources françaises » s'applique aussi à la liste BÉTA.
+- RÉSOLVEUR MIS À JOUR ET RE-VALIDÉ EN RÉEL : pages chaînes de nouveau accessibles, lecteur chiffré décodé automatiquement, flux final vérifié ce jour jusqu'aux segments vidéo jouables. Comme pour toute source de ce type, la lecture finale se fait depuis VOTRE connexion (Kodi) — les IP de serveurs peuvent être bridées à certaines heures, un lien peut alors demander 1 ou 2 essais.
+- « MATCHS » (grille principale) : AUCUN changement — mêmes matchs, mêmes liens d'origine du guide.
       [B]v3.7.16[/B] 02/11/2026
 - « ÉVÉNEMENTS EN DIRECT » DEVIENT « MATCHS » : même contenu (matchs en cours et à venir, grille du jour), libellé plus court et plus clair.
 - OPTION « SOURCES FRANÇAISES » = SEULEMENT FR DANS LES TITRES : quand « Uniquement les sources françaises » est actif (c'est le cas par défaut), la ligne d'un match n'affiche plus que « FR » en magenta gras — les autres langues (DE, IT, US…) disparaissent du titre. Si l'option est désactivée, toutes les langues réapparaissent (FR toujours premier).
@@ -116,6 +122,7 @@
     </assets>
   </extension>
 </addon>
+
 
 
 

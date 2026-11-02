@@ -4,6 +4,9 @@
         <setting id="french_only" type="bool" label="Uniquement les sources françaises (masque les matchs sans chaîne FR)" default="true" />
         <setting id="timezone" label="Choisir le fuseau horaire" type="select" values="-12|-11|-10|-9|-8|-7|-6|-5|-4|-3|-2|-1|0|+1|+2|+3|+4|+5|+6|+7|+8|+9|+10|+11|+12" default="+3" sort="yes" />
     </category>
+    <category label="Source BÉTA">
+        <setting id="spo_enabled" type="bool" label="BÉTA — Matchs SportOnline (liste séparée : Ligue 2, matchs diffusés en français)" default="true" />
+    </category>
     <category label="Affichage">
         <setting id="show_langs" type="bool" label="Langues dans le titre des matchs (FR d'abord ; FR seul si « sources françaises » actif)" default="true" />
         <setting id="group_by_sport" type="bool" label="Grouper les matchs par sport" default="false" />
