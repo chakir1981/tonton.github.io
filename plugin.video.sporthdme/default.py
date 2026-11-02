@@ -111,6 +111,9 @@ def Main_menu():
     # et « Football Libre MOV » ne sont plus proposées (les modules et les
     # modes du routeur restent en place, simplement sans entrée de menu).
     addDir(u'[B][COLOR white]ÉVÉNEMENTS EN DIRECT[/COLOR][/B]', Live_url, 'events', ICON, FANART, True)
+    # v3.7.5 — les chaînes FR sur le réseau du guide (sans jeton DaddyLive) :
+    # annuaire local + miroirs vérifiés, en lecture directe un/deux/trois.
+    addDir(u'[B][COLOR gold]CHAÎNES FR (MIROIRS)[/COLOR][/B]', 'mirror', 'mirror_menu', ICON, FANART, True)
     # v3.6.3 — retour au menu épuré 3.6.0 : les deux rubriques DaddyLive de
     # la 3.6.1 sont retirées. Leurs liens FR arrivent désormais DANS
     # « ÉVÉNEMENTS EN DIRECT » (get_events -> fr_links_for + footao + replis).
@@ -232,6 +235,7 @@ def get_events(url):  # 5
         # v3.6.3 — liens FR de la grille DaddyLive pour CE match (chaînes
         # réellement diffusées, enrichies footao, doublées d'un repli).
         # Panne silencieuse -> [] : le menu reste exactement celui de la 3.6.0.
+        ex_links = []    # v3.7.5 — liens 365scores (définis plus bas si fr_only)
         if team1 and team2 and compare != int('999999999999'):
             dl_links = site_daddylive.fr_links_for(team1, team2, compare)
         else:
@@ -272,9 +276,33 @@ def get_events(url):  # 5
                 if mi_:
                     have_ids.add(mi_.group(1))
 
+        # v3.7.5 — MIROIRS FR sur le réseau du guide (vertex/nexa/kora) :
+        # chaque chaîne FR connue (Canal+ Foot / France / Sport) existe AUSSI
+        # sur la famille de lecteurs du guide, SANS le jeton DaddyLive. Ces
+        # liens empruntent resolve2 — le chemin des liens « un / deux /
+        # trois » du guide, celui qui fonctionne chez l'utilisateur — et
+        # qualifient un match en mode strict (trio réel de 3 liens).
+        fr_names = [n for n, _u in dl_links] + [n for n, _u in ex_links]
+        try:
+            m_urls = site_daddylive.mirror_links_for(fr_names)
+        except Exception:
+            m_urls = []
+        if m_urls:
+            have_mk = set()
+            for c in channels:
+                if c.get('dl') or c.get('v365'):
+                    continue   # DaddyLive reste affiché : le miroir s'AJOUTE
+                have_mk.add(site_daddylive.mirror_key(c.get('channelName')))
+            for m_name, m_links in m_urls:
+                if site_daddylive.mirror_key(m_name) in have_mk:
+                    continue   # la chaîne est déjà là via le guide
+                channels.append({'channelName': u'%s [Miroir]' % m_name,
+                                 'language': 'FR', 'links': list(m_links)})
+
         # v3.7.0 — règle stricte : le match doit être diffusé sur une vraie
         # chaîne française du guide (avec son trio de liens un/deux/trois).
         # Les entrées DaddyLive injectées ne qualifient plus un match.
+        # v3.7.5 — les trios [Miroir] (réseau du guide) qualifient aussi.
         if fr_only and not _channels_have_french_trio(channels):
             filtered_out += 1
             continue
@@ -1013,6 +1041,93 @@ def get_links_for_channel(channel_name):
     return None
 
 
+def ensure_channel_data(max_age_h=24.0):
+    """v3.7.5 — (re)télécharge l'annuaire de canaux si absent ou périmé.
+
+    L'appel dans le routeur avait été commenté : channels.json n'existait
+    donc plus sur les installations récentes, et plus aucune chaîne de
+    l'annuaire n'était disponible. Échec réseau -> silencieux : les miroirs
+    intégrés (Canal+ Foot/France/Sport) restent disponibles sans lui."""
+    try:
+        fresh = False
+        try:
+            import os
+            fresh = (time.time() - os.path.getmtime(JSON_FILE_PATH)) < max_age_h * 3600.0
+        except Exception:
+            fresh = False
+        if not fresh:
+            fetch_and_store_channel_data()
+    except Exception as e:
+        log_info('ensure_channel_data: {0!r}'.format(e))
+
+
+def fr_directory_channels():
+    """[(nom, [liens])] des chaînes FR de l'annuaire local channels.json."""
+    out = []
+    try:
+        for ch in load_data_from_json():
+            nm = six.ensure_text(ch.get('channelName') or u'',
+                                 encoding='utf-8', errors='replace')
+            links = [l for l in (ch.get('links') or []) if l]
+            if nm and links and site_daddylive.is_fr_channel(nm):
+                out.append((nm, links))
+    except Exception as e:
+        log_info('fr_directory_channels: {0!r}'.format(e))
+    return out
+
+
+def mirror_menu():
+    """v3.7.5 — rubrique « CHAÎNES FR (MIROIRS) » : chaînes françaises
+    jouables sur le réseau du guide (resolve2, sans jeton DaddyLive).
+
+    1) l'annuaire local channels.json (beIN France, RMC, Ligue1+…) quand il
+       est disponible, 2) les miroirs vérifiés intégrés + configuration
+       distante (Canal+ Foot/France/Sport)."""
+    ensure_channel_data()
+    entries, seen = [], set()
+    for nm, links in fr_directory_channels():
+        k = site_daddylive.mirror_key(nm) or nm.lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        entries.append((nm, links))
+    for k, (disp, cid) in sorted(site_daddylive.mirror_chans().items()):
+        if k in seen:
+            continue
+        seen.add(k)
+        urls = ['https://{0}/ch?id={1}'.format(h, cid)
+                for h in site_daddylive.MIRROR_HOSTS]
+        entries.append((disp, urls))
+    if not entries:
+        control.infoDialog(u"[COLOR gold]Aucune chaîne FR disponible pour le moment.[/COLOR]",
+                           NAME, ICON, 5000)
+        return
+    for nm, links in entries:
+        data = str(quote(base64.b64encode(six.ensure_binary(str(links)))))
+        addDir(u'[COLOR gold]%s[/COLOR]' % nm, data, 'mirror_ch', ICON, nm, isFolder=True)
+    xbmcplugin.setContent(_handle, 'videos')
+    xbmcplugin.endOfDirectory(_handle)
+
+
+def mirror_play(name, data):
+    """v3.7.5 — un canal miroir -> ses liens (un / deux / trois) en lecture
+    directe via play_stream (resolve2), comme le trio du guide."""
+    try:
+        import ast
+        links = ast.literal_eval(six.ensure_text(base64.b64decode(unquote(data))))
+    except Exception as e:
+        log_error('mirror_play: {0!r}'.format(e))
+        return
+    if not isinstance(links, (list, tuple)):
+        links = [links]
+    for u_ in links:
+        info = {'title': name, 'sorttitle': '', 'plot': name}
+        addDir(u'%s | %s' % (name, _link_label(u_)), u_, 'play_stream', ICON, name,
+               isFolder=False, infoLabels=info)
+    xbmcplugin.setContent(_handle, 'videos')
+    xbmcplugin.endOfDirectory(_handle)
+
+
 ###################################################
 ###################################################
 ###################################################
@@ -1388,6 +1503,10 @@ def router(paramstring):
             site_streams_menu(params['url'])
         elif params['mode'] == 'site_play':
             site_play(params['url'])
+        elif params['mode'] == 'mirror_menu':
+            mirror_menu()
+        elif params['mode'] == 'mirror_ch':
+            mirror_play(params['description'], params['url'])
     else:
         Main_menu()
 

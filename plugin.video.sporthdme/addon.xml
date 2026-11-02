@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.4" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.5" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -16,6 +16,12 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
+      [B]v3.7.5[/B] 02/11/2026
+- NOUVELLES SOURCES FRANÇAISES qui passent par un AUTRE réseau : les liens français ajoutés ([DaddyLive]/(footao)/[365]) dépendaient tous d'une même chaîne de résolution (jeton DaddyLive) — quand elle est refusée chez vous, PLUS AUCUN lien FR ne marche. Or les chaînes Canal+ Foot / Canal+ / Canal+ Sport existent aussi sur la famille de lecteurs du guide (celle des liens un/deux/trois, qui fonctionne déjà chez vous). Chaque chaîne FR connue d'un match est donc désormais doublée d'un trio « [Miroir] » sur ce réseau : Canal+ Foot, Canal+ et Canal+ Sport, résolus par le même chemin que les liens un/deux/trois — sans jeton, sans proxy.
+- NOUVELLE RUBRIQUE « CHAÎNES FR (MIROIRS) » au menu : ouvrez directement une chaîne française (beIN Sports France, RMC Sport, Ligue1+, L'Équipe… dès que l'annuaire répond, + les miroirs Canal+ toujours disponibles) et lisez-la en direct, avec ses liens un/deux/trois.
+- Les matchs diffusés sur Canal+ Foot / Canal+ / Canal+ Sport sont désormais VISIBLES même en mode « Uniquement les sources françaises » quand le guide ne les listait pas (le trio miroir est un vrai trio de 3 liens).
+- Table des miroirs extensible sans nouvelle version : l'add-on lit « fr_mirrors » dans la configuration distante (cache 6 h) — un nouveau miroir FR peut être ajouté côté serveur en quelques heures.
+- L'annuaire de canaux (channels.json) est de nouveau téléchargé automatiquement (24 h de validité) : il alimente la rubrique CHAÎNES FR (MIROIRS). Échec réseau = silencieux, les miroirs intégrés restent disponibles.
       [B]v3.7.4[/B] 02/11/2026
 - FINI LES LONGS TEMPS DE CHARGEMENT : le cache de l'add-on vivait seulement en memoire et mourait a chaque navigation (Kodi relance le processus a chaque clic) — la grille DaddyLive, les pages clubs footao, le scan 365scores et les pages joueur etaient donc re-telecharges en boucle (jusqu'a 1-2 minutes d'attente). Tout est maintenant garde sur le disque du profil (grille 10 min, clubs footao 1 h, 365scores 30 min, pages joueur 20 min) : re-rentrer dans le menu, revenir en arriere ou relancer un lien est quasi instantane.
 - Les telechargements se font desormais EN PARALLELE : grille + clubs footao + scan 365scores en meme temps (9 appels API en parallele), page watch + page stream du joueur en meme temps. Premier affichage divise par 3 a 5 ; affichages suivants quasi instantanes.

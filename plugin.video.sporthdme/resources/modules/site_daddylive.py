@@ -121,6 +121,127 @@ def remote_domains():
     _remote_cfg['domains'] = doms
     return doms
 
+# ---------------------------------------------------------------------------
+# v3.7.5 — Miroirs FR sur le réseau du guide (vertex.st / nexa.st / kora.st).
+#
+# Tous les liens FR injectés ([DaddyLive]/(footao)/[365]) passaient par la
+# chaîne de résolution DaddyLive (watch.php -> joueur -> playlist-token).
+# Quand cette chaîne est refusée côté utilisateur (edge, TLS, jeton), PLUS
+# AUCUN lien FR ne fonctionne. Or les chaînes Canal+ (Foot / France / Sport)
+# existent AUSSI sur la famille de lecteurs du guide
+# (/api/player.php?id=N -> matchli.st -> hls.lshls.st), c'est-à-dire le
+# chemin resolve2 des liens « un / deux / trois », qui fonctionne déjà chez
+# l'utilisateur. Chaque chaîne FR connue est donc doublée d'un trio
+# [Miroir] sur ce réseau, vérifié bout en bout le 02/11/2026 (api 200 ->
+# frame -> ppcfg -> m3u8 signé ; le manifest ne répond que quand la chaîne
+# diffuse, comme les liens du guide). La table id -> chaîne est extensible
+# SANS republier l'add-on : sporthdme_remote.json, clé « fr_mirrors »
+# ({"Canal+ Foot": 50, ...}).
+# ---------------------------------------------------------------------------
+MIRROR_HOSTS = ('vertex.st', 'nexa.st', 'kora.st')
+MIRROR_BUILTIN = {
+    u'canal+foot':   (u'Canal+ Foot', 50),
+    u'canal+france': (u'Canal+ France', 51),
+    u'canal+sport':  (u'Canal+ Sport', 52),
+}
+# variantes étrangères du groupe Canal+ -> jamais un miroir FR
+_MIRROR_COUNTRY = re.compile(
+    r'poland|pologne|tch[eè]que|slovak|\bsk\b|\bcz\b|afrique|belgium|belgique|'
+    r'deutsch|germany|spain|espa|italy|italia|portugal|turkey|turquie|'
+    r'arabia|arabic|mena|netherlands|romania|romanian', re.IGNORECASE)
+# mots de suffixe à ignorer avant de chercher le mot-clé de la chaîne
+_MIRROR_STOP = set(('france', '360', 'depuis', 'etranger', 'integralite',
+                    'miroir', 'daddylive', 'repli', '365', 'footao', 'replay'))
+
+_mirror_cfg = {'ts': 0.0, 'chans': None}
+
+
+def _norm_ascii(s):
+    """minuscules sans accents, ponctuation -> espaces (le + de Canal+ reste)."""
+    try:
+        import unicodedata as _ud
+        s = _ud.normalize('NFKD', s or u'').encode('ascii', 'ignore')
+        if not isinstance(s, type(u'')):
+            s = s.decode('ascii')
+    except Exception:
+        s = s or u''
+    return s
+
+
+def mirror_key(name):
+    """Nom de chaîne -> clé miroir normalisée ('canal+foot', …) ou None.
+
+    « Canal+ Foot France » et « Canal+ Foot » -> canal+foot ; « Canal+ »
+    tout court et « Canal+ France » -> canal+france ; « Canal+ Sport 360 »
+    -> canal+sport. Variantes étrangères (Poland/CZ/SK…) -> None."""
+    n = _norm_ascii(name).lower()
+    n = re.sub(r'[^a-z0-9+ ]', ' ', n)
+    n = re.sub(r'\s+', ' ', n).strip()
+    if 'canal' not in n:
+        return None
+    if _MIRROR_COUNTRY.search(n):
+        return None
+    words = [w for w in n.replace('canal+', 'canal ').split()
+             if w and w != 'canal' and w not in _MIRROR_STOP]
+    if not words:
+        return u'canal+france'          # « Canal+ » tout court
+    for w in words:
+        if w in ('foot', 'sport', 'france'):
+            return u'canal+' + w
+        return None    # cinema/series/f1/golf… : pas de miroir connu
+    return None
+
+
+def mirror_chans():
+    """{clé -> (nom affiché, id)} : table intégrée + sporthdme_remote.json."""
+    now = time.time()
+    if _mirror_cfg['chans'] is not None and now - _mirror_cfg['ts'] < REMOTE_CFG_TTL:
+        return _mirror_cfg['chans']
+    chans = dict(MIRROR_BUILTIN)
+    try:
+        txt, code = _get(REMOTE_CFG_URL, timeout=10)
+        if code == 200:
+            data = json.loads(txt) or {}
+            for nm, cid in (data.get('fr_mirrors') or {}).items():
+                k = mirror_key(nm)
+                try:
+                    cid = int(cid)
+                except Exception:
+                    cid = 0
+                if k and cid > 0 and k not in chans:
+                    disp = nm.strip()
+                    if disp and _norm_ascii(disp):
+                        chans[k] = (disp, cid)
+    except Exception:
+        pass
+    _mirror_cfg['ts'] = now
+    _mirror_cfg['chans'] = chans
+    return chans
+
+
+def mirror_links_for(chan_names):
+    """[(nom affiché, [3 urls miroirs])] pour les noms de chaînes FR donnés.
+
+    Reçoit les noms trouvés par l'enrichissement (DaddyLive/footao/365) et
+    renvoie les chaînes connues du réseau du guide. Silencieux -> []."""
+    keys = []
+    for nm in chan_names or []:
+        k = mirror_key(nm)
+        if k and k not in keys:
+            keys.append(k)
+    if not keys:
+        return []
+    chans = mirror_chans()
+    out = []
+    for k in keys:
+        ent = chans.get(k)
+        if not ent:
+            continue
+        disp, cid = ent
+        urls = ['https://%s/ch?id=%d' % (h, cid) for h in MIRROR_HOSTS]
+        out.append((disp, urls))
+    return out
+
 _domain = None          # working domain, remembered for the session
 
 MAX_EVENT_AGE_H = 6     # hide events that started more than 6h ago
