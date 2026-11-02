@@ -285,17 +285,20 @@ def get_events(url):  # 5
         else:
             m_color = 'gold'
             state = u''
-        # v3.7.10 — langues du match dans le titre (« fr » d'abord, puis les
-        # autres : « Lorient vs Brest fr », « Sassuolo vs Fiorentina de it »).
-        # Remplace le compteur 3.7.8 qui comptait des chaînes et non des liens
-        # (les miroirs un/deux/trois triplent l'affichage -> chiffre trompeur).
+        # v3.7.11 — titre épuré : heure, équipes, langues. La compétition
+        # (« France. Ligue 1 »…) SORT de la ligne du match (elle reste dans
+        # la fiche ci-dessous, panneau d'informations du skin).
+        # v3.7.10 — les langues du match s'affichent en MAJUSCULES dans une
+        # couleur inédite (magenta) : « Lorient vs Brest FR », « Sassuolo vs
+        # Fiorentina DE IT ». Remplace le compteur 3.7.8 qui comptait des
+        # chaînes et non des liens (les miroirs un/deux/trois triplent
+        # l'affichage -> chiffre trompeur).
         cnt = u''
         if _setting_bool('show_langs'):
             cnt = _lang_suffix(_match_langs(channels))
         ftime_s = u'[COLOR cyan]{}[/COLOR]'.format(ftime)
-        name = u'{0}{1} [COLOR {2}][B]{3}[/B][/COLOR]{4} - [I]{5}[/I]{6}'.format(
-            (emo + u' ') if emo else u'', ftime_s, m_color, event, state,
-            lname, cnt)
+        name = u'{0}{1} [COLOR {2}][B]{3}[/B][/COLOR]{4}{5}'.format(
+            (emo + u' ') if emo else u'', ftime_s, m_color, event, state, cnt)
 
         # fiche du match (infoLabels) — texte brut, sans balises Kodi
         plot = []
@@ -527,14 +530,17 @@ def _match_langs(channels):
 
 
 def _lang_suffix(langs):
-    """v3.7.10 — suffixe coloré du titre : « fr » en vert, autres en gris.
-    '' si aucune langue identifiée (titre inchangé)."""
+    """v3.7.11 — suffixe du titre : codes langue en MAJUSCULES (FR, DE, IT…)
+    en MAGENTA — couleur non utilisée ailleurs dans l'add-on (or = équipes,
+    vert = EN DIRECT et FR de la liste des liens, cyan = heure, gris =
+    miroirs) ; « FR » toujours premier et en gras, les autres suivent dans
+    l'ordre alphabétique. '' si aucune langue identifiée (titre inchangé)."""
     parts = []
     for l in langs:
         if l == u'fr':
-            parts.append(u'[COLOR lime]fr[/COLOR]')
+            parts.append(u'[COLOR magenta][B]FR[/B][/COLOR]')
         else:
-            parts.append(u'[COLOR dimgray]{0}[/COLOR]'.format(l))
+            parts.append(u'[COLOR magenta]{0}[/COLOR]'.format(l.upper()))
     return (u' ' + u' '.join(parts)) if parts else u''
 
 

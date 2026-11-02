@@ -62,7 +62,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.10" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.11" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -79,6 +79,10 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
+      [B]v3.7.11[/B] 02/11/2026
+- TITRE DES MATCHS ÉPURÉ : la compétition (« France. Ligue 1 », « Italy. Serie A »…) disparaît de la ligne du match. Le titre affiche désormais uniquement l'heure, les équipes et les langues ; la compétition reste consultable dans la fiche du match (panneau d'informations du skin).
+- LANGUES EN MAJUSCULES DANS UNE COULEUR INÉDITE : les codes langue s'affichent en MAJUSCULES (FR, DE, IT, US…) en MAGENTA — couleur utilisée nulle part ailleurs dans l'add-on, impossible à confondre avec l'or (équipes), le vert (● EN DIRECT et FR de la liste des liens) ou le cyan (heure). Le FR est toujours placé en premier (en gras), les autres langues suivent dans l'ordre alphabétique. Exemples : « Lorient vs Brest FR », « Sassuolo vs Fiorentina DE IT », « PSG vs Nice FR US ».
+- Aucun autre changement : mêmes matchs, mêmes liens d'origine du guide (un/deux/trois), toujours SANS aucun lien ajouté.
       [B]v3.7.10[/B] 02/11/2026
 - LANGUES DANS LE TITRE DES MATCHS : le compteur de liens (souvent faux — il comptait les chaînes alors que l'ouverture du match liste les miroirs un/deux/trois) est remplacé par les LANGUES réelles du match : « Lorient vs Brest fr », « Sassuolo vs Fiorentina de it », « PSG vs Nice fr us »… Le fr est toujours placé en premier (en vert), les autres langues suivent en gris. Ce qui est écrit dans le titre correspond exactement aux liens listés à l'ouverture du match.
 - Nouveau réglage « Langues dans le titre des matchs » (remplace « Compteur de liens ») dans Paramètres > Affichage ; désactivable.
@@ -103,6 +107,7 @@
     </assets>
   </extension>
 </addon>
+
 
 
 
