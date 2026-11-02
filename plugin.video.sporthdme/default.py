@@ -19,6 +19,16 @@ from resources.modules import site_futbollibre
 from resources.modules import site_futbolmov
 from resources.modules import site_daddylive
 from resources.modules import site_365
+
+# v3.7.4 — cache disque persistant + exécution parallèle : les caches
+# mémoire meurent à chaque navigation Kodi (nouveau processus) et chaque
+# clic re-téléchargeait tout (jusqu'à ~2 min d'attente). fastcache garde
+# grille, pages clubs footao, scan 365scores et pages joueur sur disque,
+# et le préchauffage se fait en parallèle (voir get_events).
+try:
+    from resources.modules import fastcache as fastcache
+except Exception:
+    fastcache = None
 import time
 from dateutil.parser import parse
 from dateutil.tz import gettz
@@ -134,21 +144,47 @@ def _matches_from_page(url):
 
 def get_events(url):  # 5
     matches = None
-    if url != Live_fallback_url:
-        try:
-            matches = _matches_from_page(url)
-        except Exception as e:
-            log_info('events page {0} failed: {1!r}'.format(url, e))
-    if not matches:
-        # fallback: same schema served as plain JSON by tvsport.guide
-        try:
-            matches = requests.get(Live_fallback_url, headers={'User-Agent': client.agent()},
-                                   timeout=20).json().get('matches')
-        except Exception as e:
-            log_info('events fallback {0} failed: {1!r}'.format(Live_fallback_url, e))
+    # v3.7.4 — liste de matchs gardée 2 min sur disque : re-rentrer dans le
+    # menu (retour arrière, rafraîchissement) est instantané.
+    ck_ev = 'ev:' + url
+    if fastcache is not None:
+        matches = fastcache.fget(ck_ev, 120)
+    fetched_from_cache = matches is not None
+    if not fetched_from_cache:
+        if url != Live_fallback_url:
+            try:
+                matches = _matches_from_page(url)
+            except Exception as e:
+                log_info('events page {0} failed: {1!r}'.format(url, e))
+        if not matches:
+            # fallback: same schema served as plain JSON by tvsport.guide
+            try:
+                matches = requests.get(Live_fallback_url, headers={'User-Agent': client.agent()},
+                                       timeout=12).json().get('matches')
+            except Exception as e:
+                log_info('events fallback {0} failed: {1!r}'.format(Live_fallback_url, e))
+        if matches and fastcache is not None:
+            fastcache.fset(ck_ev, matches)
     if not matches:
         control.infoDialog(u"[COLOR red]Aucun match programmé.[/COLOR]", NAME, ICON, 5000)
         return
+
+    # v3.7.4 — préchauffage PARALLÈLE des sources FR, une seule fois par
+    # menu : grille DaddyLive + toutes les pages clubs footao utiles (le
+    # gros du temps de chargement : ~60-100 s en séquentiel au premier
+    # affichage, en 4-8 s parallèle + cache disque 1 h) et scan 365scores
+    # (9 appels API en parallèle). Les appels fr_links_for de la boucle
+    # tombent ensuite sur des caches chauds, et les navigations suivantes
+    # ne re-téléchargent plus rien (fastcache).
+    fr_only = _french_only()
+    try:
+        if fastcache is not None and not fetched_from_cache:
+            jobs = [site_daddylive.warm_fr_caches]
+            if fr_only:
+                jobs.append(site_365.day_games)
+            fastcache.run_jobs(jobs, workers=2)
+    except Exception as e:
+        log_info('warmup failed: {0!r}'.format(e))
 
     # matches = re.findall('''null\,(\{"(?:matches|customNotFoundMessage).+?)\]\}\]n''', events, re.DOTALL)[0]
     # pattern = r'("matches"\s*\:\s*\[.+?])}]}]n"'
@@ -164,7 +200,6 @@ def get_events(url):  # 5
         now_time_in_ms = (time.mktime(now.timetuple()) + now.microsecond / 1e6) * 1000
     else:
         now_time_in_ms = datetime.now().timestamp() * 1000
-    fr_only = _french_only()
     filtered_out = 0
     for match in matches:
         channels = match.get("channels", [])
@@ -257,6 +292,8 @@ def get_events(url):  # 5
 
         # streams = str(quote(base64.b64encode(six.ensure_binary(str(streams)))))
     if not event_list:
+        if fastcache is not None:
+            fastcache.flush()          # persister les caches réchauffés
         if filtered_out:
             control.infoDialog(u"[COLOR gold]Aucune source française parmi les matchs du moment.[/COLOR]", NAME, ICON, 6000)
         return
@@ -267,6 +304,8 @@ def get_events(url):  # 5
         icon = event[3]
         addDir(name, streams, 'get_streams', icon, FANART, isFolder=True)
 
+    if fastcache is not None:
+        fastcache.flush()              # persister les caches réchauffés
     xbmcplugin.setContent(_handle, 'videos')
     xbmcplugin.endOfDirectory(_handle)
 

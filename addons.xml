@@ -59,7 +59,9 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.3" provider-name="chakir1981">
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.4" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -76,7 +78,13 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
-      [B]v3.7.3[/B] 02/11/2026
+      [B]v3.7.4[/B] 02/11/2026
+- FINI LES LONGS TEMPS DE CHARGEMENT : le cache de l'add-on vivait seulement en memoire et mourait a chaque navigation (Kodi relance le processus a chaque clic) — la grille DaddyLive, les pages clubs footao, le scan 365scores et les pages joueur etaient donc re-telecharges en boucle (jusqu'a 1-2 minutes d'attente). Tout est maintenant garde sur le disque du profil (grille 10 min, clubs footao 1 h, 365scores 30 min, pages joueur 20 min) : re-rentrer dans le menu, revenir en arriere ou relancer un lien est quasi instantane.
+- Les telechargements se font desormais EN PARALLELE : grille + clubs footao + scan 365scores en meme temps (9 appels API en parallele), page watch + page stream du joueur en meme temps. Premier affichage divise par 3 a 5 ; affichages suivants quasi instantanes.
+- La grille DaddyLive n'est plus telechargee deux fois de suite (le domaine qui marche est retenu 30 min, le HTML sert a la fois a la verification et a la grille) ; les connexions sont reutilisees (keep-alive) et les delais d'attente reduits (20 s -> 12 s) pour ne plus rester bloque sur un serveur lent.
+- Si DaddyLive est momentanement injoignable, le menu repart de la derniere grille connue (jusqu'a 3 h) au lieu d'etre vide.
+- [B]v3.7.3[/B] 02/11/2026
+
 - CORRIGÉ le bug « erreur » sur les liens français ajoutés : [DaddyLive], (footao), [365] et leurs replis échouaient à la lecture alors que les liens un/deux/trois du guide marchaient (ex. Denver vs Kansas City). Cause : le serveur de flux de DaddyLive exige désormais l'en-tête « Origin » EN PLUS du « Referer » pour délivrer son jeton de lecture — sans lui, l'add-on tombait sur une URL refusée (« token required »).
 - FINI LES COUPURES À 2 MINUTES : le jeton de DaddyLive expire après ~2 minutes (et est lié à votre adresse IP). L'add-on embarque maintenant un mini-serveur local qui redemande un jeton neuf à CHAQUE rechargement du flux, exactement comme le lecteur du site web — la lecture continue tout un match.
 - Les segments vidéo restent servis directement par leur CDN (aucune perte de débit, rien ne transite par Internet en plus). Les sous-playlists et clés éventuelles sont gérées automatiquement.

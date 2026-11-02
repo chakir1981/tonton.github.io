@@ -25,6 +25,7 @@ qualify them as verified French broadcasts (main + repli links).
 import json
 import re
 import time
+import threading
 
 BASE = 'https://webws.365scores.com/web/'
 QS = ('appTypeId=5&locale=fr&timezoneName=Europe/Paris&userCountryId=5'
@@ -182,6 +183,30 @@ def _iso_ms(s):
 # Network helpers (requests like site_daddylive, JSON flavour)
 # ---------------------------------------------------------------------------
 
+# v3.7.4 — cache disque persistant (fastcache) : les caches mémoire meurent
+# à chaque navigation Kodi. Comme pour la grille DaddyLive, le scan du jour
+# et les détails par match sont gardés sur le disque du profil.
+try:
+    from resources.modules import fastcache as _fc
+except Exception:
+    try:
+        import fastcache as _fc
+    except Exception:
+        _fc = None
+
+_tls_sess = threading.local()
+
+
+def _sess():
+    """Session keep-alive par thread (v3.7.4)."""
+    import requests
+    s = getattr(_tls_sess, 's', None)
+    if s is None:
+        s = requests.Session()
+        _tls_sess.s = s
+    return s
+
+
 def _api(url, timeout=12):
     """GET a 365scores JSON endpoint -> (dict, status)."""
     import requests
@@ -191,10 +216,10 @@ def _api(url, timeout=12):
            'Referer': 'https://www.365scores.com/',
            'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8'}
     try:
-        r = requests.get(url, headers=hdr, timeout=timeout)
+        r = _sess().get(url, headers=hdr, timeout=timeout)
     except Exception:
         try:
-            r = requests.get(url, headers=hdr, timeout=timeout, verify=False)
+            r = _sess().get(url, headers=hdr, timeout=timeout, verify=False)
         except Exception:
             return None, 0
     if r.status_code != 200:
@@ -207,22 +232,34 @@ def _api(url, timeout=12):
 
 def day_games(fetch=None):
     """Games of the day carrying FR TV data: [{'gid','teams','start_ms',
-    'sport','comp'}]. Cached 30 min; silent [] on failure."""
+    'sport','comp'}]. Cached 30 min (mémoire + disque v3.7.4) ; silent []
+    on failure. v3.7.4 : les 9 appels par sport partent en parallèle
+    (2-3 s au lieu de 6-8 s séquentiels avec les pauses)."""
     now = time.time()
     if _day_cache['games'] is not None and now - _day_cache['ts'] < DAY_TTL:
         return _day_cache['games']
+    if _fc is not None:
+        disk = _fc.fget('365day', DAY_TTL)
+        if disk is not None:
+            _day_cache['ts'] = now
+            _day_cache['games'] = disk
+            return disk
     if now - _dead['ts'] < DEAD_TTL:
         return _day_cache['games'] or []
     get = fetch or _api
     games = []
-    ok_calls = 0
-    for sid, _name in SPORTS:
+    ok_calls = [0]
+
+    def _one(sid_name):
+        sid, name = sid_name
+        time.sleep(PAUSE)          # reste poli aussi en parallèle
         try:
-            data, code = get('%sgames/current/?%s&sports=%d' % (BASE, QS, sid))
+            data, code = get('%sgames/current/?%s&sports=%d'
+                             % (BASE, QS, sid))
         except Exception:
             data, code = None, 0
         if code == 200 and data:
-            ok_calls += 1
+            ok_calls[0] += 1
             for g in (data.get('games') or []):
                 if not g.get('hasTVNetworks'):
                     continue
@@ -234,16 +271,30 @@ def day_games(fetch=None):
                     'gid': g.get('id'),
                     'teams': [home, away],
                     'start_ms': _iso_ms(g.get('startTime')),
-                    'sport': _name,
+                    'sport': name,
                     'comp': g.get('competitionDisplayName') or u'',
                 })
-        time.sleep(PAUSE)
-    if not ok_calls:
-        _dead['ts'] = now          # service down: back off, retry in 10 min
+
+    if fetch is None and _fc is not None:
+        _fc.parallel_map(_one, list(SPORTS), workers=3)
+    else:
+        for sid_name in SPORTS:
+            _one(sid_name)
+    if not ok_calls[0]:
+        # service down: back off, retry in 10 min ; grace disque 12 h
+        _dead['ts'] = now
+        if _fc is not None:
+            stale = _fc.fstale('365day', 12 * 3600)
+            if stale:
+                _day_cache['ts'] = now
+                _day_cache['games'] = stale
+                return stale
         _day_cache['games'] = []
     else:
         _day_cache['ts'] = now
         _day_cache['games'] = games
+        if _fc is not None:
+            _fc.fset('365day', games)
     return games
 
 
@@ -271,11 +322,17 @@ def _grid_channel_ids():
 
 def game_channels(gid, fetch=None):
     """FR-whitelist channels of one game: [(DaddyLive name, watch_id), …].
-    Cached 30 min per game. [] on any failure."""
+    Cached 30 min per game (mémoire + disque v3.7.4). [] on any failure."""
     now = time.time()
     hit = _game_cache.get(gid)
     if hit and now - hit[0] < GAME_TTL:
         return hit[1]
+    if _fc is not None:
+        disk = _fc.fget('365g:%s' % gid, GAME_TTL)
+        if disk is not None:
+            out = [tuple(x) for x in disk]
+            _game_cache[gid] = (now, out)
+            return out
     get = fetch or _api
     try:
         data, code = get('%sgame/?%s&gameId=%s&withExpanded=true'
@@ -304,6 +361,8 @@ def game_channels(gid, fetch=None):
                 continue   # Apple TV absent de la grille du jour -> rien
         out.append((dl_name, int(cid)))
     _game_cache[gid] = (now, out)
+    if _fc is not None:
+        _fc.fset('365g:%s' % gid, [list(x) for x in out])
     return out
 
 

@@ -40,6 +40,19 @@ import re
 import json
 import time
 import calendar
+import threading
+
+# v3.7.4 — cache disque persistant : les caches mémoire meurent à chaque
+# navigation Kodi (nouveau processus), chaque clic re-téléchargeait donc
+# grille, pages clubs footao et pages joueur. fastcache les garde sur le
+# disque du profil et fournit l'exécution parallèle (fastcache.map_calls).
+try:
+    from resources.modules import fastcache as _fc
+except Exception:
+    try:
+        import fastcache as _fc
+    except Exception:
+        _fc = None
 
 try:
     from html import unescape as _unescape  # Py3
@@ -313,7 +326,21 @@ def parse_channels_247(html, domain):
 # Network (Kodi / real use)
 # ---------------------------------------------------------------------------
 
-def _get(url, referer=None, timeout=20, origin=None):
+_tls = threading.local()          # une session requests par thread
+
+
+def _sess():
+    """Session keep-alive par thread (v3.7.4) : évite une poignée de main
+    TLS par requête vers un même hôte (grille, footao, joueur…)."""
+    import requests
+    s = getattr(_tls, 'sess', None)
+    if s is None:
+        s = requests.Session()
+        _tls.sess = s
+    return s
+
+
+def _get(url, referer=None, timeout=12, origin=None):
     import requests
     import requests.packages.urllib3 as _u3
     try:
@@ -328,24 +355,39 @@ def _get(url, referer=None, timeout=20, origin=None):
     if origin:
         hdr['Origin'] = origin
     try:
-        r = requests.get(url, headers=hdr, timeout=timeout)
+        r = _sess().get(url, headers=hdr, timeout=timeout)
     except Exception:
-        r = requests.get(url, headers=hdr, timeout=timeout, verify=False)
+        r = _sess().get(url, headers=hdr, timeout=timeout, verify=False)
     return r.content.decode('utf-8', 'replace'), r.status_code
+
+
+# v3.7.4 — le HTML index.php récupéré pendant la vérification du domaine
+# est remis à _schedule_fr_events : un seul téléchargement au lieu de deux.
+_index_stash = {'domain': None, 'txt': None, 'ts': 0.0}
 
 
 def _working_domain():
     """Primary domain first, then seeds, then the remote config's domains
     (v3.7.0 : miroirs de secours publiés sur le GitHub Pages de l'addon,
-    modifiables sans nouvelle version). Remember what worked."""
+    modifiables sans nouvelle version). Remember what worked.
+    v3.7.4 : le domaine qui marche est retenu sur disque 30 min — plus de
+    sondage complet (index.php entier par domaine, 15 s de timeout !) à
+    chaque navigation ; le HTML récupéré pendant la vérification est
+    stashé pour la grille (1 seul téléchargement au total)."""
     global _domain
     if _domain:
         return _domain
-    for d in DOMAINS:
+    d0 = _fc.fget('dl_dom', 1800) if _fc is not None else None
+    order = ([d0] if d0 else []) + [d for d in DOMAINS if d != d0]
+    for d in order:
         try:
-            txt, code = _get(d + '/index.php', timeout=15)
+            txt, code = _get(d + '/index.php', timeout=10)
             if code == 200 and 'schedule__event' in txt:
                 _domain = d.rstrip('/')
+                if _fc is not None:
+                    _fc.fset('dl_dom', _domain)
+                _index_stash.update(domain=_domain, txt=txt,
+                                    ts=time.time())
                 return _domain
         except Exception:
             continue
@@ -353,9 +395,13 @@ def _working_domain():
     # les domaines intégrés ont tous échoué)
     for d in remote_domains():
         try:
-            txt, code = _get(d + '/index.php', timeout=15)
+            txt, code = _get(d + '/index.php', timeout=10)
             if code == 200 and 'schedule__event' in txt:
                 _domain = d.rstrip('/')
+                if _fc is not None:
+                    _fc.fset('dl_dom', _domain)
+                _index_stash.update(domain=_domain, txt=txt,
+                                    ts=time.time())
                 return _domain
         except Exception:
             continue
@@ -639,11 +685,17 @@ def parse_footao_page(html, today=None):
 
 
 def _footao_fetch(eq):
-    """Page club (suivant la redirection JS) -> HTML, avec cache 1 h."""
+    """Page club (suivant la redirection JS) -> HTML, avec cache 1 h
+    (mémoire + disque persistant v3.7.4)."""
     now = time.time()
     hit = _ftao_cache.get(eq)
     if hit and now - hit[0] < FOOTAO_TTL:
         return hit[1]
+    if _fc is not None:
+        disk = _fc.fget('ftao:' + eq, FOOTAO_TTL)
+        if disk is not None:
+            _ftao_cache[eq] = (now, disk)
+            return disk
     try:
         from urllib.parse import quote as _q
     except ImportError:
@@ -660,7 +712,72 @@ def _footao_fetch(eq):
     if code != 200:
         raise Exception('footao %s -> HTTP %s' % (eq, code))
     _ftao_cache[eq] = (now, txt)
+    if _fc is not None:
+        _fc.fset('ftao:' + eq, txt)
     return txt
+
+
+def _footao_eqs_for(title):
+    """v3.7.4 — titre de match -> slugs footao des clubs (0 à 2).
+
+    Même dérivation qu'enrich_servers ( FOOTAO_CLUBS, clé de club ) mais
+    sans exiger les deux clubs : sert au préchauffage parallèle."""
+    try:
+        teams = teams_from_title(title or u'')
+        if len(teams) != 2:
+            return []
+        tnorms = [_club_key(_norm_team(t)) for t in teams]
+        eq_list = []
+        for t in tnorms:
+            for cname, ceq in FOOTAO_CLUBS.items():
+                if _club_key(_norm_team(cname)) == t:
+                    if all(e != ceq for e, _t in eq_list):
+                        eq_list.append(ceq)
+        return eq_list
+    except Exception:
+        return []
+
+
+def warm_fr_caches(max_workers=4):
+    """v3.7.4 — préchauffage des caches FR, appelé UNE fois à l'ouverture
+    du menu : grille du jour puis TOUTES les pages clubs footao utiles aux
+    matchs à chaînes FR, en parallèle. Avant : 2,8 s x 2 clubs x chaque
+    match, en séquentiel (~60-100 s au premier affichage) ; maintenant le
+    tout en quelques secondes, et les pages sont gardées sur disque 1 h
+    (fastcache) : les navigations suivantes ne re-téléchargent plus rien.
+    Retourne le nombre de clubs couverts (log)."""
+    try:
+        events = _schedule_fr_events()
+    except Exception:
+        return 0
+    eqs = []
+    for e in events:
+        if not [c for c in (e.get('servers') or []) if is_fr_channel(c[0])]:
+            continue
+        for eq in _footao_eqs_for(e.get('title') or u''):
+            if eq not in eqs:
+                eqs.append(eq)
+    now = time.time()
+    todo = []
+    for eq in eqs:
+        hit = _ftao_cache.get(eq)
+        if hit and now - hit[0] < FOOTAO_TTL:
+            continue
+        if _fc is not None and _fc.fresh('ftao:' + eq, FOOTAO_TTL):
+            continue
+        todo.append(eq)
+    if todo:
+        if _fc is not None:
+            _fc.parallel_map(_footao_fetch, todo, workers=max_workers)
+        else:
+            for eq in todo:
+                try:
+                    _footao_fetch(eq)
+                except Exception:
+                    pass
+    if _fc is not None:
+        _fc.flush()
+    return len(eqs)
 
 
 def _footao_chan_lookup(name):
@@ -772,21 +889,69 @@ def enrich_servers(title, servers, today=None, fetch=None):
 # ---------------------------------------------------------------------------
 
 SCHED_TTL = 600              # grille du jour rechargée au plus 1x/10 min
+SCHED_STALE = 3 * 3600       # v3.7.4 : grace hors-ligne sur la copie disque
 _sched_cache = {'ts': 0.0, 'events': None}
 
 
 def _schedule_fr_events():
-    """Grille du jour (liste d'événements normalisés) avec cache 10 min."""
+    """Grille du jour (liste d'événements normalisés) avec cache 10 min.
+
+    v3.7.4 : la grille ET le HTML index.php sont gardés aussi sur disque
+    (fastcache) — une nouvelle navigation Kodi ne re-télécharge plus rien
+    tant que le cache est frais ; et si le site est momentanément
+    injoignable, on repart de la dernière grille connue (grace 3 h) au
+    lieu de proposer un menu vide."""
     now = time.time()
     if _sched_cache['events'] is not None and now - _sched_cache['ts'] < SCHED_TTL:
         return _sched_cache['events']
-    domain = _working_domain()
-    if not domain:
-        raise Exception('DaddyLive injoignable (%s)' % ', '.join(DOMAINS))
-    txt, code = _get(domain + '/index.php', referer=domain + '/')
-    if code != 200:
-        raise Exception('grille DaddyLive -> HTTP %s' % code)
-    events = parse_schedule(txt, domain)
+    # v3.7.4 — grille déjà PARSENDE sur disque : zéro téléchargement, zéro
+    # parsing (le parse de 626 événements coûte ~0,5 s à chaque navigation).
+    if _fc is not None:
+        disk_ev = _fc.fget('dl_sched', SCHED_TTL)
+        if disk_ev is not None:
+            _sched_cache['ts'] = now
+            _sched_cache['events'] = disk_ev
+            return disk_ev
+    global _domain
+    domain = None
+    if _fc is not None:
+        domain = _fc.fget('dl_dom', 1800)
+    if domain:
+        _domain = domain
+    else:
+        domain = _working_domain()
+    txt = None
+    if _index_stash['txt'] is not None and _index_stash['domain'] == domain \
+            and now - _index_stash['ts'] < SCHED_TTL:
+        txt = _index_stash['txt']          # déjà récupéré par _working_domain
+    elif _fc is not None:
+        txt = _fc.fget('dl_index', SCHED_TTL)
+    events = None
+    if txt is not None:
+        try:
+            events = parse_schedule(txt, domain)
+        except Exception:
+            events = None
+    if events is None:
+        try:
+            txt2, code = _get(domain + '/index.php', referer=domain + '/')
+            if code == 200:
+                events = parse_schedule(txt2, domain)
+                if _fc is not None:
+                    _fc.fset('dl_index', txt2)
+        except Exception:
+            events = None
+    if events is None and _fc is not None:
+        stale = _fc.fstale('dl_sched', SCHED_STALE)
+        if stale:
+            # retente dans 5 min sans bloquer le menu
+            _sched_cache['ts'] = now - SCHED_TTL + 300
+            _sched_cache['events'] = stale
+            return stale
+    if events is None:
+        raise Exception('grille DaddyLive indisponible')
+    if _fc is not None:
+        _fc.fset('dl_sched', events)
     _sched_cache['ts'] = now
     _sched_cache['events'] = events
     return events
@@ -1113,25 +1278,67 @@ def resolve(server_url, prefer_fallback=False):
     domain = 'https://' + (p[1].split('/', 1)[0] if len(p) > 1 else p[0])
     watch_ref = '%s/watch.php?id=%s' % (domain, cid)
 
-    # 1) watch page -> first same-origin stream page (stream/ or cast/)
-    page = '%s/stream/stream-%s.php' % (domain, cid)
-    try:
-        txt, code = _get(watch_ref, referer=domain + '/')
-        if code == 200:
-            m1 = _IFRAME_RE.search(txt)
-            if m1:
-                src = _absolutise(m1.group(1), domain)
-                if '//' + domain.split('//', 1)[1] in src:
-                    page = src   # same-origin hop -> use it
-    except Exception:
-        pass
+    # v3.7.4 — reprise instantanée : les constantes du joueur EDGE (SRC /
+    # CHANNEL / EDGE) de cette chaîne sont gardées sur disque 20 min ; il ne
+    # reste qu'à demander un jeton neuf (~0,5 s) au lieu de recharger les 3
+    # pages (watch, stream, joueur). Si le jeton est refusé, on retombe sur
+    # la chaîne complète ci-dessous (constantes peut-être périmées).
+    if _fc is not None:
+        cch = _fc.fget('dlp:' + cid, 1200)
+        if cch and cch.get('src') and cch.get('chan') and cch.get('edge'):
+            try:
+                token = _mint_token(cch['edge'], cch['chan'],
+                                    cch['player_url'], cch['player_origin'])
+                if token:
+                    local = proxy_manifest_url(
+                        cch['src'], cch['chan'], cch['edge'],
+                        cch['player_url'], cch['player_origin'])
+                    if local:
+                        return local, cch['player_url']
+                    ts = int(time.time() * 1000)
+                    return '%s?t=%s&_=%s' % (cch['src'], token, ts), \
+                        cch['player_url']
+            except Exception:
+                pass                     # cache périmé -> chaîne complète
 
-    # 2) stream page -> external player iframe (rotating hosts)
-    txt2, code2 = _get(page, referer=watch_ref)
-    if code2 != 200:
-        # variant used by some mirrors
+    # 1+2) page watch + page stream PAR DÉFAUT en parallèle (v3.7.4) :
+    # stream/stream-<id>.php est déterministe ; le saut same-origin détecté
+    # sur la page watch n'est suivi que s'il diffère — un aller-retour
+    # économisé à chaque résolution froide.
+    page = '%s/stream/stream-%s.php' % (domain, cid)
+    dhost = domain.split('//', 1)[1]
+
+    def _f_watch():
+        try:
+            return _get(watch_ref, referer=domain + '/')
+        except Exception:
+            return '', 0
+
+    def _f_stream(u):
+        try:
+            return _get(u, referer=watch_ref)
+        except Exception:
+            return '', 0
+
+    if _fc is not None:
+        r1, r2 = _fc.map_calls([_f_watch, lambda: _f_stream(page)])
+    else:
+        r1, r2 = _f_watch(), _f_stream(page)
+    txt_w, code_w = (r1 if isinstance(r1, tuple) else ('', 0))
+    txt2, code2 = (r2 if isinstance(r2, tuple) else ('', 0))
+    if code_w == 200:
+        m1 = _IFRAME_RE.search(txt_w)
+        if m1:
+            src1 = _absolutise(m1.group(1), domain)
+            if '//' + dhost in src1 and src1 != page:
+                # saut same-origin DIFFÉRENT de la page par défaut : le suivre
+                t3, c3 = _f_stream(src1)
+                if c3 == 200:
+                    page, txt2, code2 = src1, t3, c3
+    if code2 != 200 and page.endswith('/stream/stream-%s.php' % cid):
+        # variante cast/ utilisée par certains miroirs (comportement d'origine)
         alt = '%s/cast/stream-%s.php' % (domain, cid)
-        txt2, code2 = _get(alt, referer=watch_ref)
+        txt2, code2 = _f_stream(alt)
         if code2 != 200:
             raise Exception('page stream %s -> HTTP %s' % (page, code2))
         page = alt
@@ -1179,6 +1386,13 @@ def resolve(server_url, prefer_fallback=False):
         src = m_src.group(1).replace('\\/', '/')
         chan = m_chan.group(1).replace('\\/', '/')
         edge = m_edge.group(1).replace('\\/', '/')
+        # v3.7.4 — constantes gardées sur disque 20 min : au prochain clic
+        # sur cette chaîne, résolution en ~1 s (jeton seul) au lieu de
+        # recharger les 3 pages.
+        if _fc is not None:
+            _fc.fset('dlp:' + cid, {'src': src, 'chan': chan,
+                                    'edge': edge, 'player_url': player_url,
+                                    'player_origin': player_origin})
         # v3.7.3 — jeton demandé AVEC Origin (sinon 403 « forbidden »),
         # puis manifest servi par le mini-serveur local qui redemande un
         # jeton neuf à chaque chargement de playlist : sans renouvellement
