@@ -62,7 +62,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.7" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.8" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -79,12 +79,15 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
-      [B]v3.7.7[/B] 02/11/2026
-- NAVIGATION ACCÉLÉRÉE — MENU TOUJOURS INSTANTANÉ : la liste des matchs s'affiche depuis le cache disque même au-delà des 2 min (jusqu'à 3 h) et se re-télécharge EN ARRIÈRE-PLAN pour la navigation suivante — plus aucune attente devant le menu, même sur réseau lent.
-- PRÉCHAUFFAGE À L'OUVERTURE : la grille commence à se télécharger dès l'écran d'accueil de l'add-on, pendant que vous choisissez — le premier clic sur « ÉVÉNEMENTS EN DIRECT » est instantané.
-- CLIC SUR UN LIEN JUSQU'À 3× PLUS RAPIDE : les miroirs du guide (vertex/nexa/kora) sont interrogés EN PARALLÈLE en une seule salve au lieu d'un par un (mesuré : 3,0 s -> 1,1 s), et leurs réponses sont gardées 30 min sur disque — le 2e clic sur la même chaîne ne rappelle plus l'api du tout (0,00 s mesuré).
-- PLUS AUCUNE ATTENTE BLOQUÉE : tous les délais maximaux de résolution passent de 30 s (voire illimités sur 2 appels) à 12 s — un serveur mort est abandonné immédiatement au profit du suivant.
-- Toujours SANS aucun lien ajouté : uniquement les liens d'origine du guide (un / deux / trois), comme en 3.7.6.
+      [B]v3.7.8[/B] 02/11/2026
+- ERGONOMIE + VISUEL — TITRES PLUS LISIBLES : icône du sport sur chaque match (⚽ 🏈 🏀 🎾 🏒 🥊 🚴…), badge vert « ● EN DIRECT » sur les matchs en cours, mention grisée « fini » sur les matchs terminés, et compteur « · 2 liens FR » en fin de ligne pour savoir d'un coup d'œil si le match est jouable en français.
+- FICHE DE MATCH : chaque match porte désormais sa description (sport, compétition, heure de début, chaînes disponibles) — visible dans le panneau d'informations du skin.
+- NOUVEAU MENU CONTEXTUEL « ACTUALISER LA GRILLE » : appui long (ou touche C) sur n'importe quel match -> la liste des matchs est re-téléchargée immédiatement et l'écran se rafraîchit ; plus besoin d'attendre l'expiration du cache ni de vider les données.
+- LISTE DES LIENS NUMÉROTÉE : 1. 2. 3.…, nom de la chaîne en or, langue française en VERT (langue étrangère en gris), miroir un/deux/trois en gris discret.
+- LECTURE PLUS CONFORTE : roue d'attente pendant la résolution du lien (plus d'écran qui semble figé), message clair quand un flux ne répond pas (« Impossible de lire ce flux — réessayez ou choisissez un autre lien »), titre propre du match dans le lecteur, type MIME HLS explicite pour un démarrage plus fiable.
+- NAVIGATION PLUS FLUIDE ENCORE : la base de chaînes locale est lue/indexée une seule fois (avant : parcours complet à chaque match) — l'affichage de la grille de 100 matchs reste instantané (mesuré 0,001 s).
+- NOUVEAUX RÉGLAGES « AFFICHAGE » : icônes emoji des sports (on/off), compteur de liens (on/off), grouper les matchs par sport (off par défaut) — Add-ons > SportHD > Paramètres.
+- Toujours SANS aucun lien ajouté : uniquement les liens d'origine du guide (un / deux / trois), comme en 3.7.6 et 3.7.7.
     </news>
 
     <assets>
@@ -93,6 +96,7 @@
     </assets>
   </extension>
 </addon>
+
 
 
 </addons>

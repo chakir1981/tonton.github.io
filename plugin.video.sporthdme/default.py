@@ -109,15 +109,24 @@ def Main_menu():
     # arrière-plan dès l'écran d'accueil, pendant que l'utilisateur lit le
     # menu -> le premier clic sur « ÉVÉNEMENTS EN DIRECT » est instantané.
     _refresh_matches_bg(Live_url)
-    addDir(u'[B][COLOR white]ÉVÉNEMENTS EN DIRECT[/COLOR][/B]', Live_url, 'events', ICON, FANART, True)
+    # v3.7.8 — descriptions des entrées du menu (panneau d'information du skin)
+    addDir(u'[B][COLOR white]ÉVÉNEMENTS EN DIRECT[/COLOR][/B]', Live_url, 'events', ICON, FANART, True,
+           infoLabels={'title': u'Événements en direct',
+                       'plot': u'Matchs en cours et à venir — grille du jour, sources françaises en priorité.'})
     # addDir('[B][COLOR gold]Channels 24/7[/COLOR][/B]', 'https://1.livesoccer.sx/program.php', 14, ICON, FANART, '')
     # addDir('[B][COLOR gold]Alternative VIEW [/COLOR][/B]', '', '', ICON, FANART, '')
     # addDir('[B][COLOR gold]Alternative LIVE EVENTS[/COLOR][/B]', Alt_url, 15, ICON, FANART, '')
     # addDir('[B][COLOR white]SPORTS[/COLOR][/B]', '', 3, ICON, FANART, '')
     # addDir('[B][COLOR white]BEST LEAGUES[/COLOR][/B]', '', 2, ICON, FANART, '')
-    addDir(u'[B][COLOR gold]Paramètres[/COLOR][/B]', 'set', 'settings', ICON, FANART, False)
-    addDir(u"[B][COLOR gold]Vider les données de l'add-on[/COLOR][/B]", 'clear', 'clear', ICON, FANART, False)
-    addDir(u'[B][COLOR gold]Version : [COLOR lime]{}[/COLOR][/B]'.format(vers), '', 'version', ICON, FANART, False)
+    addDir(u'[B][COLOR gold]Paramètres[/COLOR][/B]', 'set', 'settings', ICON, FANART, False,
+           infoLabels={'title': u'Paramètres',
+                       'plot': u'Uniquement les sources françaises, fuseau horaire, affichage (emoji, compteurs, groupement).'})
+    addDir(u"[B][COLOR gold]Vider les données de l'add-on[/COLOR][/B]", 'clear', 'clear', ICON, FANART, False,
+           infoLabels={'title': u"Vider les données de l'add-on",
+                       'plot': u'Supprime le cache (grille, lecteurs) et la base de chaînes locales.'})
+    addDir(u'[B][COLOR gold]Version : [COLOR lime]{}[/COLOR][/B]'.format(vers), '', 'version', ICON, FANART, False,
+           infoLabels={'title': u'Version ' + six.ensure_text(vers, encoding='utf-8', errors='replace'),
+                       'plot': u'Vérifier les mises à jour des dépôts.'})
     xbmcplugin.setContent(_handle, 'movies')
     xbmcplugin.endOfDirectory(_handle)
 
@@ -262,11 +271,57 @@ def get_events(url):  # 5
         is_live = False
         if compare <= now_time_in_ms <= compare + duration_in_ms:
             is_live = True
+        finished = (not is_live) and now_time_in_ms > compare + duration_in_ms
 
-        m_color = "lime" if is_live else "gold"
-        ftime = u'[COLOR cyan]{}[/COLOR]'.format(ftime)
-        name = u'{0} [COLOR {1}]{2}[/COLOR] - [I]{3}[/I]'.format(ftime, m_color, event, lname)
-        event_list.append([name, compare, channels, icon])
+        # v3.7.8 — habillage : emoji du sport, badge d'état, compteur de
+        # liens, et une fiche lisible (plot) pour le panneau d'information.
+        emo = _sport_emoji(sport, lname)
+        if is_live:
+            m_color = 'lime'
+            state = u' [COLOR lime][B]● EN DIRECT[/B][/COLOR]'
+        elif finished:
+            m_color = 'grey'
+            state = u' [COLOR grey]fini[/COLOR]'
+        else:
+            m_color = 'gold'
+            state = u''
+        cnt = u''
+        if _setting_bool('show_link_count'):
+            n = _count_french(channels) if fr_only else len(channels or [])
+            if n:
+                cnt = u' [COLOR {0}]· {1} {2}{3}[/COLOR]'.format(
+                    'lime' if fr_only else 'dimgray', n, _links_word(n),
+                    u' FR' if fr_only else u'')
+        ftime_s = u'[COLOR cyan]{}[/COLOR]'.format(ftime)
+        name = u'{0}{1} [COLOR {2}][B]{3}[/B][/COLOR]{4} - [I]{5}[/I]{6}'.format(
+            (emo + u' ') if emo else u'', ftime_s, m_color, event, state,
+            lname, cnt)
+
+        # fiche du match (infoLabels) — texte brut, sans balises Kodi
+        plot = []
+        if lname and lname != sport:
+            plot.append(u'{0} — {1}'.format(sport or u'Sport', lname))
+        elif sport:
+            plot.append(sport)
+        plot.append(u'Début : {0}{1}'.format(_plain(ftime),
+                                             u' — en direct' if is_live else u''))
+        chan_names = []
+        for ch in (channels or [])[:6]:
+            try:
+                if isinstance(ch, dict):
+                    nm = ch.get('name')
+                else:
+                    row = _db_channel(six.ensure_text(ch, encoding='utf-8', errors='replace'))
+                    nm = row.get('channelName') if row else None
+                if nm:
+                    chan_names.append(six.ensure_text(nm, encoding='utf-8', errors='replace'))
+            except Exception:
+                continue
+        if chan_names:
+            plot.append(u'Chaînes : ' + u', '.join(chan_names))
+        info = {'title': _plain(event), 'plot': u'\n'.join(plot),
+                'genre': six.ensure_text(sport, encoding='utf-8', errors='replace') or u'Sport'}
+        event_list.append([name, compare, channels, icon, sport, info])
 
         # streams = str(quote(base64.b64encode(six.ensure_binary(str(streams)))))
     if not event_list:
@@ -275,12 +330,19 @@ def get_events(url):  # 5
         if filtered_out:
             control.infoDialog(u"[COLOR gold]Aucune source française parmi les matchs du moment.[/COLOR]", NAME, ICON, 6000)
         return
-    events = sorted(event_list, key=lambda x: x[1])
+    # v3.7.8 — tri par heure (comme avant) ou groupement par sport (réglage)
+    if _setting_bool('group_by_sport', 'false'):
+        events = sorted(event_list, key=lambda x: (six.ensure_text(x[4], encoding='utf-8', errors='replace').lower(), x[1]))
+    else:
+        events = sorted(event_list, key=lambda x: x[1])
+    ctx_refresh = [(u'Actualiser la grille',
+                    'RunPlugin({0}?mode=refresh_events)'.format(_url))]
     for event in deduplicate_events(events):
         streams = str(quote(base64.b64encode(six.ensure_binary(str(event[2])))))
         name = event[0]
         icon = event[3]
-        addDir(name, streams, 'get_streams', icon, FANART, isFolder=True)
+        addDir(name, streams, 'get_streams', icon, FANART, isFolder=True,
+               infoLabels=event[5], context=ctx_refresh)
 
     if fastcache is not None:
         fastcache.flush()              # persister la liste mise en cache
@@ -290,11 +352,29 @@ def get_events(url):  # 5
 
 def deduplicate_events(events):
     unique_events = []
+    seen = set()
     for event in events:
-        unique_key = (event[0], event[1], tuple(event[2]), event[3])
-        if unique_key not in unique_events:
-            unique_events.append(unique_key)
+        # repr(channels) : hachable que les canaux soient des chaînes OU des
+        # dict (tuple() d'un dict lèverait TypeError).
+        unique_key = (event[0], event[1], repr(event[2]), event[3], event[4])
+        if unique_key not in seen:
+            seen.add(unique_key)
+            unique_events.append(event)
     return unique_events
+
+
+def refresh_events(url):
+    """v3.7.8 — menu contextuel « Actualiser la grille » : re-télécharge la
+    liste des matchs immédiatement (avant : il fallait attendre l'expiration
+    du cache ou vider les données), puis redessine la liste affichée."""
+    control.infoDialog(u"[COLOR skyblue]Actualisation de la grille…[/COLOR]", NAME, ICON, 3000)
+    matches = _fetch_matches(url)
+    if fastcache is not None:
+        fastcache.flush()
+    if not matches:
+        control.infoDialog(u"[COLOR gold]Actualisation impossible pour le moment (réseau ?).[/COLOR]", NAME, ICON, 5000)
+        return
+    xbmc.executebuiltin('Container.Refresh')
 
 
 # ---------------------------------------------------------------------------
@@ -369,15 +449,50 @@ def _is_french_source(name, lang):
 
 
 def _db_channel(channel_name):
-    """Cherche une chaîne par nom dans la base locale (channels.json)."""
+    """Cherche une chaîne par nom dans la base locale (channels.json).
+    v3.7.8 : la base est indexée UNE fois par processus (dict nom -> entrée)
+    au lieu d'un parcours linéaire à chaque appel — la grille de 100 matchs
+    s'affiche nettement plus vite quand la base de chaînes est grosse."""
     try:
-        wanted = channel_name.replace(' ', '')
-        for channel in load_data_from_json():
-            if channel.get('channelName', '').replace(' ', '') == wanted:
-                return channel
+        wanted = (channel_name or '').replace(' ', '')
+        return _db_index().get(wanted)
     except Exception:
         return None
-    return None
+
+
+_DB_INDEX = {'built': False, 'map': {}}
+
+
+def _db_index():
+    if _DB_INDEX['built']:
+        return _DB_INDEX['map']
+    idx = {}
+    try:
+        for channel in load_data_from_json():
+            idx[channel.get('channelName', '').replace(' ', '')] = channel
+    except Exception:
+        pass
+    _DB_INDEX['map'] = idx
+    _DB_INDEX['built'] = True
+    return idx
+
+
+def _count_french(channels):
+    """v3.7.8 — nombre de chaînes françaises d'un match (compteur affiché)."""
+    n = 0
+    try:
+        for ch in channels or []:
+            if isinstance(ch, dict):
+                if _is_french_source(ch.get('name'), ch.get('language')):
+                    n += 1
+            else:
+                row = _db_channel(six.ensure_text(ch, encoding='utf-8', errors='replace'))
+                if row is not None and _is_french_source(row.get('channelName'),
+                                                         row.get('language')):
+                    n += 1
+    except Exception:
+        return n
+    return n
 
 
 def _channels_have_french(channels):
@@ -430,6 +545,88 @@ def _link_label(link):
     return host
 
 
+# ---------------------------------------------------------------------------
+# v3.7.8 — ergonomie / visuel
+# ---------------------------------------------------------------------------
+
+def _setting_bool(key, default='true'):
+    """Petit accesseur réglage booléen (settings.xml), tolérant aux pannes."""
+    try:
+        return (ADDON.getSetting(key) or default).strip().lower() == 'true'
+    except Exception:
+        return default == 'true'
+
+
+def _plain(text):
+    """Retire les balises Kodi ([B] [I] [CR] [COLOR x]…) pour les champs
+    infoLabels (le panneau d'information du skin les affiche en clair)."""
+    try:
+        return re.sub(r'\[/?(?:B|I|CR|UPPERCASE|LOWERCASE|COLOR[^\]]*)\]',
+                      u'', text or u'', flags=re.IGNORECASE).strip()
+    except Exception:
+        return text or u''
+
+
+# Ordre IMPORTANT : 'american' avant 'foot' (american football), 'table'
+# avant 'tennis' (table tennis), 'nba'/'nhl'/'ufc' etc. d'abord car plus précis.
+_SPORT_EMOJI = (
+    (u'american', u'🏈'), (u'nfl', u'🏈'),
+    (u'table', u'🏓'), (u'ping', u'🏓'),
+    (u'basket', u'🏀'), (u'nba', u'🏀'),
+    (u'foot', u'⚽'), (u'soccer', u'⚽'), (u'calcio', u'⚽'),
+    (u'futbol', u'⚽'), (u'fussball', u'⚽'),
+    (u'tennis', u'🎾'), (u'atp', u'🎾'), (u'wta', u'🎾'),
+    (u'wimbledon', u'🎾'), (u'roland', u'🎾'),
+    (u'hockey', u'🏒'), (u'nhl', u'🏒'),
+    (u'baseball', u'⚾'), (u'mlb', u'⚾'),
+    (u'volley', u'🏐'),
+    (u'handball', u'🤾'), (u'hand', u'🤾'),
+    (u'boxe', u'🥊'), (u'boxing', u'🥊'), (u'ufc', u'🥊'),
+    (u'mma', u'🥊'), (u'fight', u'🥊'),
+    (u'rugby', u'🏉'),
+    (u'cricket', u'🏏'),
+    (u'golf', u'⛳'),
+    (u'f1', u'🏎'), (u'formula', u'🏎'), (u'formule', u'🏎'),
+    (u'moto', u'🏍'), (u'nascar', u'🏎'),
+    (u'dart', u'🎯'),
+    (u'snooker', u'🎱'), (u'billard', u'🎱'), (u'pool', u'🎱'),
+    (u'cycl', u'🚴'),
+    (u'swim', u'🏊'), (u'natation', u'🏊'), (u'polo', u'🤽'),
+    (u'ski', u'⛷'), (u'snowboard', u'🏂'),
+    (u'chess', u'♟'), (u'échec', u'♟'), (u'echec', u'♟'),
+    (u'esport', u'🎮'), (u'e-sport', u'🎮'), (u'counter', u'🎮'),
+    (u'dota', u'🎮'), (u'league of legends', u'🎮'),
+    (u'athlet', u'🏃'), (u'athlét', u'🏃'), (u'marathon', u'🏃'),
+)
+
+
+def _sport_emoji(sport, league):
+    """Icône emoji du sport (réglage « Icônes emoji des sports »)."""
+    if not _setting_bool('show_emoji'):
+        return u''
+    hay = u'{0} {1}'.format(sport or u'', league or u'').lower()
+    for kw, emo in _SPORT_EMOJI:
+        if kw in hay:
+            return emo
+    return u''
+
+
+def _links_word(n):
+    return u'lien' if n == 1 else u'liens'
+
+
+def _chan_label(chan, lang, fr):
+    """Libellé d'un lien dans la liste d'un match : chaîne en or, langue en
+    vert quand c'est du français (gris sinon)."""
+    lang = six.ensure_text(lang or u'', encoding='utf-8', errors='replace').strip()
+    tag = u''
+    if fr:
+        tag = u'[COLOR lime]{0}[/COLOR]'.format(lang.upper() or u'FR')
+    elif lang:
+        tag = u'[COLOR dimgray]{0}[/COLOR]'.format(lang)
+    return u'[COLOR gold]{0}[/COLOR]{1}'.format(chan, u' ' + tag if tag else u'')
+
+
 def get_stream(name, url):  # 4
     data = six.ensure_text(base64.b64decode(unquote(url))).strip('\n')
 
@@ -443,20 +640,22 @@ def get_stream(name, url):  # 4
             for chan, link, lang in datos:
                 chan = six.ensure_text(chan, encoding='utf-8', errors='replace')
                 lang = six.ensure_text(lang, encoding='utf-8', errors='replace')
-                if fr_only and not _is_french_source(chan, lang):
+                fr = _is_french_source(chan, lang)
+                if fr_only and not fr:
                     continue
-                chan = u'[COLOR gold]{}[/COLOR] - {}'.format(chan, lang)
-                sstreams.append((link, chan))
+                # v3.7.8 — chaîne en or, langue en vert FR / gris
+                sstreams.append((link, _chan_label(chan, lang, fr)))
 
         else:
-            if fr_only and not _is_french_source(event.get('name'), event.get('language')):
+            fr = _is_french_source(event.get('name'), event.get('language'))
+            if fr_only and not fr:
                 continue
             link = event.get('links', [])
             lang = six.ensure_text(event.get('language', ''), encoding='utf-8', errors='replace')
             chan = six.ensure_text(event.get('name', ''), encoding='utf-8', errors='replace')
-            chan = u'[COLOR gold]{}[/COLOR] - {}'.format(chan, lang)
+            # v3.7.8 — chaîne en or, langue en vert FR / gris
             for url_ in link:
-                sstreams.append((url_, chan))
+                sstreams.append((url_, _chan_label(chan, lang, fr)))
 
     if len(sstreams) < 1:
         if fr_only:
@@ -469,14 +668,17 @@ def get_stream(name, url):  # 4
         return
     else:
         if len(sstreams) > 1:
-            for i in sstreams:
+            # v3.7.8 — liens numérotés (1. 2. 3.…) pour s'y retrouver, miroir
+            # (un/deux/trois) en gris discret, fiche en texte propre.
+            for idx, i in enumerate(sstreams, 1):
                 title, link = i[1], i[0]
-                if not 'vecdn' in link:
-                    # if not 'https://bedsport' in link and not 'vecdn' in link:
-                    if not str(link) == str(title):
-                        title += ' | {}'.format(_link_label(link))
-                info = {'title': title, 'sorttitle': '', 'plot': name}
-                addDir(title, link, 'play_stream', ICON, name, isFolder=False, infoLabels=info)
+                lbl = _link_label(link)
+                if lbl and 'vecdn' not in link and str(link) != str(title):
+                    title = u'{0} [COLOR dimgray]· {1}[/COLOR]'.format(title, lbl)
+                num = u'[COLOR dimgray]{0}.[/COLOR] '.format(idx)
+                info = {'title': _plain(title), 'sorttitle': '', 'plot': _plain(name)}
+                addDir(num + title, link, 'play_stream', ICON, name,
+                       isFolder=False, infoLabels=info)
             xbmcplugin.setContent(_handle, 'videos')
             xbmcplugin.endOfDirectory(_handle)
 
@@ -489,7 +691,10 @@ def xbmc_curl_encode(url, headers):
     return "{}|{}".format(url, urlencode(headers))
 
 
-def resolve2(name, url):
+def _resolve2_impl(name, url):
+    """v3.7.8 : extrait l'URL finale du flux et la RETOURNE (la lecture,
+    elle, est faite par resolve2() qui affiche la roue d'attente pendant
+    l'extraction)."""
     stream_url = ''
     ua_win = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/77.0.3865.120 Safari/537.36'
     ua = 'Mozilla/5.0 (iPad; CPU OS 15_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.6.1 Mobile/15E148 Safari/604.1'
@@ -887,9 +1092,26 @@ def resolve2(name, url):
         stream_url = url
 
     # xbmc.log('STREAM: {}'.format(stream_url))
-    liz = xbmcgui.ListItem(six.ensure_str(name, encoding='utf-8', errors='replace'))
+    return stream_url
+
+
+def resolve2(name, url):
+    """v3.7.8 — roue d'attente pendant la résolution (plus d'écran qui semble
+    figé), message clair si aucun flux n'est extrait, lecture avec un titre
+    propre et le bon type MIME HLS (démarrage plus fiable du lecteur)."""
+    xbmc.executebuiltin('ActivateWindow(busydialognocancel)')
+    try:
+        stream_url = _resolve2_impl(name, url)
+    finally:
+        xbmc.executebuiltin('Dialog.Close(busydialognocancel)')
+    if not stream_url:
+        raise Exception(u'Flux introuvable pour ce lien — réessayez ou choisissez un autre serveur.')
+    liz = xbmcgui.ListItem(six.ensure_str(_plain(name), encoding='utf-8', errors='replace'))
     liz.setArt({'icon': ICON, 'thumb': ICON, 'poster': ICON, 'fanart': FANART})
+    liz.setInfo('video', {'title': _plain(name)})
     liz.setProperty("IsPlayable", "true")
+    liz.setContentLookup(False)
+    liz.setMimeType('application/vnd.apple.mpegurl')
     liz.setPath(stream_url)
     xbmc.Player().play(stream_url, liz, False)
 
@@ -964,12 +1186,30 @@ def fetch_and_store_channel_data():
 
 
 def load_data_from_json():
+    # v3.7.8 — lecture disque une seule fois par version du fichier (mtime) :
+    # la base est lue en boucle par l'index de chaînes et le compteur FR.
+    try:
+        mtime = xbmcvfs.Stat(JSON_FILE_PATH).st_mtime()
+    except Exception:
+        mtime = None
+    if _DB_CACHE['data'] is not None and _DB_CACHE['mtime'] == mtime:
+        return _DB_CACHE['data']
     if not xbmcvfs.exists(JSON_FILE_PATH):
         return []
     f = control.openFile(JSON_FILE_PATH, 'r')
     contents = f.read()
     f.close()
-    return json.loads(contents)
+    try:
+        data = json.loads(contents)
+    except Exception:
+        return []
+    _DB_CACHE['mtime'] = mtime
+    _DB_CACHE['data'] = data
+    _DB_INDEX['built'] = False      # l'index suit la nouvelle version
+    return data
+
+
+_DB_CACHE = {'mtime': None, 'data': None}
 
 
 def get_links_for_channel(channel_name):
@@ -1087,7 +1327,7 @@ def Open_settings():
     control.openSettings()
 
 
-def addDir(name, url, mode, iconimage, description, isFolder=True, infoLabels=None):
+def addDir(name, url, mode, iconimage, description, isFolder=True, infoLabels=None, context=None):
     if isinstance(name, str):
         name = six.ensure_text(name)
     if isinstance(url, str):
@@ -1110,6 +1350,12 @@ def addDir(name, url, mode, iconimage, description, isFolder=True, infoLabels=No
     liz.setArt({'icon': iconimage, 'thumb': iconimage, 'poster': iconimage, 'fanart': FANART})
     if infoLabels:
         liz.setInfo(type="Video", infoLabels=infoLabels)
+    if context:
+        # v3.7.8 — menu contextuel (appui long / touche C) sur l'élément
+        try:
+            liz.addContextMenuItems(context)
+        except Exception:
+            pass
     if not isFolder:
         if mode == 'settings' or mode == 'version' or mode == 'clear' or mode == 'play_stream' or mode == 'site_play':
             isFolder = False
@@ -1242,7 +1488,12 @@ def site_play(payload):
     title = d.get('t') or NAME
     poster = d.get('p') or ICON
     Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
-    result = site.resolve(d['u'])
+    # v3.7.8 — roue d'attente pendant la résolution (sites annexes)
+    xbmc.executebuiltin('ActivateWindow(busydialognocancel)')
+    try:
+        result = site.resolve(d['u'])
+    finally:
+        xbmc.executebuiltin('Dialog.Close(busydialognocancel)')
     if not result:
         raise Exception('could not resolve stream for ' + d['u'])
     # resolve() normally returns just the m3u8 string; sites that chain
@@ -1319,6 +1570,9 @@ def router(paramstring):
             resolve2(params['description'], params['url'])
         elif params['mode'] == 'settings':
             Open_settings()
+        elif params['mode'] == 'refresh_events':
+            # v3.7.8 — menu contextuel « Actualiser la grille »
+            refresh_events(params.get('url') or Live_url)
         elif params['mode'] == 'clear':
             control.deleteFile(LAST_UPDATE_FILE)
             # v3.7.6 — le cache disque fastcache fait partie des données :
@@ -1332,6 +1586,10 @@ def router(paramstring):
                     fastcache._items = None   # sera rechargé au prochain accès
             except Exception:
                 pass
+            # v3.7.8 — la base de chaînes et son index sont aussi des données
+            _DB_CACHE['data'] = None
+            _DB_CACHE['mtime'] = None
+            _DB_INDEX['built'] = False
             control.infoDialog(u"[COLOR gold]Fichiers effacés[/COLOR]", NAME,
                                ICON, 5000)
         elif params['mode'] == 'version':
@@ -1359,8 +1617,10 @@ if __name__ == '__main__':
             snippet = six.ensure_text(str(e), encoding='utf-8', errors='replace')
             if len(snippet) > 180:
                 snippet = snippet[:180] + u'...'
+            # v3.7.8 — message d'erreur plus parlant qu'un simple dump technique
             control.infoDialog(
-                u'[COLOR red]{0}[/COLOR]'.format(snippet),
-                NAME, ICON, 5000)
+                u'[COLOR red]Impossible de lire ce flux.[/COLOR] '
+                u'[COLOR dimgray]Réessayez ou choisissez un autre lien ({0})[/COLOR]'.format(snippet),
+                NAME, ICON, 6000)
         except Exception:
             pass
