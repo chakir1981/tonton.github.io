@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<settings>
+    <category label="Réglages">
+        <setting id="french_only" type="bool" label="Uniquement le français dans les titres (FR d'abord)" default="true" />
+        <setting id="all_sports" type="bool" label="Tous les sports (sinon football seulement)" default="false" />
+        <setting id="all_channels" type="bool" label="Toutes les chaînes à l'ouverture d'un match (y compris étrangères)" default="false" />
+    </category>
+    <category label="Sources d'appoint">
+        <setting id="spo_enabled" type="bool" label="PLUS DE MATCHS — SportOnline (Ligue 2, matchs diffusés en français)" default="true" />
+        <setting id="iptv_enabled" type="bool" label="CHAÎNES EN CLAIR — playlist publique IPTV-org" default="true" />
+        <setting id="lsoc_enabled" type="bool" label="PLUS DE MATCHS — LiveSoccer (grille française du jour)" default="true" />
+    </category>
+</settings>

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="plugin.video.footfr" name="Foot FR" version="1.0.0" provider-name="chakir1981">
+  <requires>
+    <import addon="script.module.six" />
+    <import addon="script.module.requests" version="2.19.1" />
+  </requires>
+  <extension point="xbmc.python.pluginsource" library="default.py">
+    <provides>video</provides>
+  </extension>
+  <extension point="xbmc.addon.metadata">
+    <summary lang="fr_fr">Foot FR par chakir1981 — matchs de football en français</summary>
+    <description lang="fr_fr">Matchs de football en français : grille du jour avec chaînes françaises uniquement, chaînes FR en continu (24h/24), source d'appoint (Ligue 2, matchs diffusés en français) et chaînes françaises en clair. Add-on SÉPARÉ de SportHD : les deux peuvent être installés ensemble.</description>
+    <disclaimer lang="fr_fr">Tous les flux de cet add-on sont hébergés sur des sites tiers et mis en ligne par d'autres personnes. Nous ne sommes pas responsables des contenus hébergés sur ces sites tiers. En cas de problème juridique, veuillez contacter les propriétaires/hébergeurs vidéo concernés.</disclaimer>
+    <language>FR</language>
+    <license>GNU GPL, version 2</license>
+    <news>
+      [B]v1.0.0[/B] 03/11/2026
+- PREMIÈRE VERSION — NOUVEL ADD-ON SÉPARÉ (coexiste avec SportHD) : « Foot FR » rassemble les matchs de football en français dans une seule liste claire.
+- MATCHS FR DU JOUR : la grille du guide, uniquement les matchs avec chaîne française (langues déclarées fiables), football par défaut (tous les sports selon réglage), tri chronologique, badge vert « ● EN DIRECT », langues en magenta (FR d'abord).
+- PAR CHAÎNE FR (24h/24) : les chaînes françaises du guide sont des flux continus — regardables à tout moment, même sans match (Canal+ Foot, Canal+ France/Ligue1+…), avec pastille « ● match en cours » et les matchs du jour dans la fiche.
+- PLUS DE MATCHS (SportOnline) : source d'appoint avec langues DÉCLARÉES par la source (FR fiable) — la Ligue 2 et les matchs diffusés en français absents du guide (vérifié en direct : Reims – Sochaux, Red Star – Nancy). Résolveur dédié (pages chaînes + lecteur décodé), lecture depuis votre connexion.
+- CHAÎNES EN CLAIR (IPTV-org) : playlist publique GitHub de chaînes françaises en clair, flux directs m3u8 — chaque chaîne est testée automatiquement (pastille « ● disponible » / « · indisponible », test depuis VOTRE connexion, cache 30 min).
+- PLUS DE MATCHS (LiveSoccer) : grille française du jour (géo-IP) — les matchs reconnus dans le guide sont jouables immédiatement, les autres s'affichent en gris SANS aucun lien inventé.
+- RÉSOLVEUR ÉPROUVÉ : les trois miroirs du guide sont essayés automatiquement (repli vertex -> nexa -> kora), réponses des lecteurs en cache 30 min, roue d'attente pendant la résolution, menu contextuel « Actualiser la grille ».
+- RÉGLAGES : football seulement ou tous les sports, toutes les chaînes (y compris étrangères) à l'ouverture d'un match, sources d'appoint activables/désactivables.
+- Aucun lien ajouté en dur : uniquement les liens déclarés par les sources du jour.
+    </news>
+
+    <assets>
+      <icon>icon2.png</icon>
+      <fanart>fanart2.jpg</fanart>
+    </assets>
+  </extension>
+</addon>
