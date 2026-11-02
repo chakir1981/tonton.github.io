@@ -313,7 +313,7 @@ def parse_channels_247(html, domain):
 # Network (Kodi / real use)
 # ---------------------------------------------------------------------------
 
-def _get(url, referer=None, timeout=20):
+def _get(url, referer=None, timeout=20, origin=None):
     import requests
     import requests.packages.urllib3 as _u3
     try:
@@ -325,6 +325,8 @@ def _get(url, referer=None, timeout=20):
            'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8'}
     if referer:
         hdr['Referer'] = referer
+    if origin:
+        hdr['Origin'] = origin
     try:
         r = requests.get(url, headers=hdr, timeout=timeout)
     except Exception:
@@ -834,6 +836,251 @@ def fr_links_for(team1, team2, start_ms=0, today=None):
 
 
 # ---------------------------------------------------------------------------
+# v3.7.3 — mini-serveur local « jeton renouvelé ».
+#
+# L'edge DaddyLive (const SRC/CHANNEL/EDGE des pages premium) n'ouvre ses
+# playlists qu'avec un jeton /api/playlist-token : lié à l'IP du demandeur,
+# exigeant les en-têtes Referer+Origin, et expirant après ~2 min (ttl=120).
+# Le player web renouvelle son jeton en continu (à ttl/2) ; un lecteur Kodi
+# rejoue la même URL et se fait couper au bout de 2 min — quand il obtient
+# un jeton. On sert donc le manifest depuis 127.0.0.1 : à CHAQUE chargement
+# de playlist (un lecteur recharge un live toutes les ~7 s) le serveur
+# demande un jeton neuf avec les bons en-têtes puis renvoie le manifest ;
+# les segments, ouverts, restent servis directement par leur CDN.
+# Le processus d'addon héberge ce serveur : default.py appelle
+# proxy_keepalive() pour le maintenir en vie pendant la lecture.
+# ---------------------------------------------------------------------------
+try:
+    from urllib.parse import urljoin as _urljoin_compat  # Py3
+except ImportError:
+    from urlparse import urljoin as _urljoin_compat      # Py2
+
+_PROXY_PORT = 45798            # port préféré ; occupé -> port éphémère
+_proxy_state = {'srv': None, 'base': '', 'routes': {}, 'counter': 0}
+_tok_cache = {}                # (edge, chan) -> (token, expires_at)
+_edge_session = None           # session dédiée : jeton + manifest même flux
+
+_EDGE_TTL_S = 120              # ttl annoncé par l'edge
+_EDGE_RENEW_S = 55             # on re-minte après 55 s (le web : ttl/2)
+
+
+def _edge_sess():
+    """Session HTTP dédiée à l'edge (garde le même flux jeton+manifest)."""
+    global _edge_session
+    if _edge_session is None:
+        import requests as _rq
+        try:
+            import requests.packages.urllib3 as _u3
+            _u3.disable_warnings()
+        except Exception:
+            pass
+        _edge_session = _rq.Session()
+        _edge_session.headers.update({'User-Agent': UA})
+    return _edge_session
+
+
+def _mint_token(edge, chan, referer, origin):
+    """Jeton /api/playlist-token (en cache _EDGE_RENEW_S, comme le web).
+
+    v3.7.3 : l'edge refuse la demande (403 forbidden) sans l'en-tête
+    Origin EN PLUS du Referer — c'est l'origine du bug « erreur » sur les
+    liens ajoutés : l'ancien code n'envoyait que le Referer.
+    """
+    if not (edge and chan and origin):
+        return ''
+    key = (edge, chan)
+    hit = _tok_cache.get(key)
+    if hit and time.time() < hit[1]:
+        return hit[0]
+    hdr = {'Referer': referer, 'Origin': origin,
+           'Accept': 'application/json, text/plain, */*'}
+    for attempt in (1, 2):     # le player web retente après 1 s : pareil
+        try:
+            r = _edge_sess().get('%s/api/playlist-token?slug=%s' % (edge, chan),
+                                 headers=hdr, timeout=10)
+            token = (r.json() or {}).get('token') or ''
+        except Exception:
+            token = ''
+        if token:
+            _tok_cache[key] = (token, time.time() + _EDGE_RENEW_S)
+            return token
+        if attempt == 1:
+            time.sleep(1.2)
+    return ''
+
+
+_CLEAN_QUERY_RE = re.compile(r'[?&](t|_)=[^&]*')
+
+
+def _fetch_edge_playlist(edge_url, edge, chan, referer, origin):
+    """Playlist edge avec jeton frais : nettoie t/_ puis ?t=…&_=ms."""
+    token = _mint_token(edge, chan, referer, origin)
+    if not token:
+        return '', 0
+    clean = _CLEAN_QUERY_RE.sub('', edge_url)
+    sep = '&' if '?' in clean else '?'
+    # Date.now() du lecteur web = MILLISECONDES ; jeton+manifest demandés
+    # dos à dos sur la même session (même IP auprès de l'edge).
+    url = '%s%st=%s&_=%s' % (clean, sep, token, int(time.time() * 1000))
+    try:
+        r = _edge_sess().get(url, headers={'Referer': referer,
+                                           'Origin': origin}, timeout=12)
+        return r.content.decode('utf-8', 'replace'), r.status_code
+    except Exception:
+        return '', 0
+
+
+_ABS_URL_RE = re.compile(r'^https?://', re.IGNORECASE)
+_URI_ATTR_RE = re.compile(r'(URI=")([^"]+)(")')
+
+
+def _serve_manifest(body, base_url, creds):
+    """Prépare le manifest pour Kodi : sous-playlists (*.m3u8) routées par
+    le proxy local (jeton), URI="…" et lignes relatives absolutisées, les
+    segments (ouverts) laissés directs vers leur CDN."""
+    out = []
+    for line in body.splitlines():
+        ls = line.strip()
+        if not ls:
+            continue
+        if ls.startswith('#'):
+            def _fix_uri(m):
+                u = m.group(2)
+                if not _ABS_URL_RE.match(u):
+                    u = _urljoin_compat(base_url, u)
+                return m.group(1) + u + m.group(3)
+            ls = _URI_ATTR_RE.sub(_fix_uri, ls)
+            out.append(ls)
+            continue
+        if not _ABS_URL_RE.match(ls):
+            ls = _urljoin_compat(base_url, ls)
+        if ls.lower().split('?')[0].endswith('.m3u8'):
+            ls = _register_route(ls, creds)
+        out.append(ls)
+    return u'\n'.join(out) + u'\n'
+
+
+def start_proxy():
+    """Mini-serveur HTTP 127.0.0.1 (1×/processus) -> base URL ou ''."""
+    st = _proxy_state
+    if st['srv'] is not None:
+        return st['base']
+    try:
+        try:
+            from http.server import BaseHTTPRequestHandler   # Py3
+            from http.server import HTTPServer as _HTTPServer
+            try:
+                from http.server import ThreadingHTTPServer as _Srv
+            except ImportError:
+                import socketserver as _ss
+
+                class _Srv(_ss.ThreadingMixIn, _HTTPServer):
+                    daemon_threads = True
+        except ImportError:                                   # Py2
+            from BaseHTTPServer import BaseHTTPRequestHandler
+            import SocketServer as _ss
+
+            class _Srv(_ss.ThreadingMixIn, _ss.HTTPServer):
+                daemon_threads = True
+
+        class _Handler(BaseHTTPRequestHandler):
+            protocol_version = 'HTTP/1.1'
+
+            def log_message(self, *a):   # silencieux : kodi.log reste lisible
+                pass
+
+            def do_GET(self):
+                route = st['routes'].get(self.path)
+                code, ctype = 404, 'text/plain'
+                body = u'route inconnue'
+                if route:
+                    txt, sc = _fetch_edge_playlist(
+                        route['url'], route['edge'], route['chan'],
+                        route['referer'], route['origin'])
+                    if sc == 200 and '#EXTM3U' in txt:
+                        code, ctype = 200, 'application/vnd.apple.mpegurl'
+                        body = _serve_manifest(txt, route['url'], route)
+                    elif sc:
+                        code = 502
+                        body = u'edge HTTP %s' % sc
+                    else:
+                        code = 502
+                        body = u'jeton indisponible'
+                data = body.encode('utf-8')
+                self.send_response(code)
+                self.send_header('Content-Type', ctype)
+                self.send_header('Content-Length', str(len(data)))
+                self.send_header('Cache-Control', 'no-store')
+                self.end_headers()
+                try:
+                    self.wfile.write(data)
+                except Exception:
+                    pass
+
+        srv = None
+        for port in (_PROXY_PORT, 0):
+            try:
+                srv = _Srv(('127.0.0.1', port), _Handler)
+                break
+            except Exception:
+                continue
+        if srv is None:
+            return ''
+        import threading
+        th = threading.Thread(target=srv.serve_forever)
+        th.daemon = True
+        th.start()
+        st['srv'] = srv
+        st['base'] = 'http://127.0.0.1:%d' % srv.server_address[1]
+        return st['base']
+    except Exception:
+        return ''
+
+
+def _register_route(target_url, creds):
+    """Enregistre une playlist edge -> chemin local /dl/<n>.m3u8."""
+    st = _proxy_state
+    if not st['base']:
+        if not start_proxy():
+            return ''
+    route = dict(creds)
+    route['url'] = target_url
+    st['counter'] += 1
+    path = '/dl/%d.m3u8' % st['counter']
+    st['routes'][path] = route
+    return st['base'] + path
+
+
+def proxy_manifest_url(src, chan, edge, player_url, player_origin):
+    """URL locale du manifest à jeton renouvelé ; '' si serveur impossible."""
+    if not start_proxy():
+        return ''
+    return _register_route(src, {'edge': edge, 'chan': chan,
+                                 'referer': player_url,
+                                 'origin': player_origin})
+
+
+def proxy_keepalive():
+    """Garde le processus d'addon (et donc le serveur) vivant pendant la
+    lecture. Kodi-safe : sort dès l'arrêt de la lecture ou de Kodi."""
+    try:
+        import xbmc
+        monitor = xbmc.Monitor()
+        player = xbmc.Player()
+        deadline = time.time() + 45      # délai de démarrage de la lecture
+        while not monitor.abortRequested():
+            if player.isPlaying():
+                while not monitor.abortRequested() and player.isPlaying():
+                    monitor.waitForAbort(2)
+                break
+            if time.time() > deadline:
+                break
+            monitor.waitForAbort(1)
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Resolution
 # ---------------------------------------------------------------------------
 
@@ -914,25 +1161,46 @@ def resolve(server_url, prefer_fallback=False):
         except Exception:
             pass
 
-    # b) const SRC / CHANNEL / EDGE -> playlist-token (StepDaddyLiveHD layout)
-    try:
-        src = re.search(r'const\s+SRC\s*=\s*"((?:[^"\\]|\\.)*)"', txt3).group(1)
-        chan = re.search(r'const\s+CHANNEL\s*=\s*"((?:[^"\\]|\\.)*)"', txt3).group(1)
-        edge = re.search(r'const\s+EDGE\s*=\s*"((?:[^"\\]|\\.)*)"', txt3).group(1)
-        src = src.replace('\\/', '/')
-        chan = chan.replace('\\/', '/')
-        edge = edge.replace('\\/', '/')
-        tok_url = '%s/api/playlist-token?slug=%s' % (edge, chan)
-        tok_txt, tok_code = _get(tok_url, referer=player_url)
-        tok = json.loads(tok_txt)
-        token = tok.get('token') or ''
-        if token:
-            ts = int(time.time())
-            return '%s?t=%s&_=%s' % (src, token, ts), player_url
-    except Exception:
-        pass
+    # b) const SRC / CHANNEL / EDGE -> playlist-token (layout 2026 : tous les
+    #    canaux premium). v3.7.3 — l'edge exige DÉSORMAIS l'en-tête Origin
+    #    sur /api/playlist-token : le player web est servi depuis un autre
+    #    domaine, son fetch part donc toujours avec Origin+Referer ; sans
+    #    Origin la demande de jeton prend 403 « forbidden » et l'ancien code
+    #    retombait silencieusement sur l'URL m3u8 nue de la page, que l'edge
+    #    refuse avec « token required » — d'où l'erreur systématique sur les
+    #    liens ajoutés ([DaddyLive]/(footao)/(repli)) alors que les liens du
+    #    guide (vertex/nexa/kora, autre CDN) marchaient. Le jeton est lié à
+    #    l'IP du demandeur et vit ~2 min (ttl) : demandé à la dernière
+    #    seconde, comme le player web qui le renouvelle lui-même.
+    m_src = re.search(r'const\s+SRC\s*=\s*"((?:[^"\\]|\\.)*)"', txt3)
+    m_chan = re.search(r'const\s+CHANNEL\s*=\s*"((?:[^"\\]|\\.)*)"', txt3)
+    m_edge = re.search(r'const\s+EDGE\s*=\s*"((?:[^"\\]|\\.)*)"', txt3)
+    if m_src and m_chan and m_edge:
+        src = m_src.group(1).replace('\\/', '/')
+        chan = m_chan.group(1).replace('\\/', '/')
+        edge = m_edge.group(1).replace('\\/', '/')
+        # v3.7.3 — jeton demandé AVEC Origin (sinon 403 « forbidden »),
+        # puis manifest servi par le mini-serveur local qui redemande un
+        # jeton neuf à chaque chargement de playlist : sans renouvellement
+        # l'edge coupe la lecture après ~2 min (ttl du jeton).
+        token = _mint_token(edge, chan, player_url, player_origin)
+        if not token:
+            # pas de jeton = l'URL SRC est morte de toute façon (« token
+            # required ») : erreur claire plutôt qu'un lien qui échoue
+            # en lecture chez l'utilisateur.
+            raise Exception('jeton de flux refusé par %s — réessaie dans '
+                            'quelques secondes' % edge)
+        local = proxy_manifest_url(src, chan, edge, player_url, player_origin)
+        if local:
+            return local, player_url
+        # serveur local impossible (rare) : URL directe à jeton, valable
+        # ~2 min seulement — mieux que rien
+        ts = int(time.time() * 1000)   # le lecteur web : Date.now() en ms
+        return '%s?t=%s&_=%s' % (src, token, ts), player_url
 
-    # c) last resort: bare file:/source: m3u8 in the player page
+    # c) dernière chance : m3u8 nu dans la page — seulement sur les pages
+    #    SANS constellation EDGE (les pages premium à jeton ne tombent plus
+    #    ici : leur m3u8 nu est refusé par l'edge, voir ci-dessus).
     for rx in (r'file:\s*["\']([^"\']+\.m3u8[^"\']*)["\']',
                r'source:\s*["\']([^"\']+\.m3u8[^"\']*)["\']',
                r'(https?://[^\s"\'<>]+\.m3u8[^\s"\'<>]*)'):

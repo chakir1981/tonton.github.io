@@ -1309,6 +1309,12 @@ def site_play(payload):
         liz.setProperty('inputstream.ffmpegdirect.default_url', stream_url)
     liz.setPath(stream_url)
     xbmc.Player().play(stream_url, liz, False)
+    # v3.7.3 — le manifest DaddyLive est servi par le mini-serveur local
+    # 127.0.0.1 (jeton renouvelé à chaque rechargement de playlist : l'edge
+    # expire les jetons après ~2 min). Ce serveur vit dans CE processus
+    # d'addon : il doit rester en vie tant que la lecture tourne.
+    if stream_url.startswith('http://127.0.0.1'):
+        site_daddylive.proxy_keepalive()
 
 
 def router(paramstring):

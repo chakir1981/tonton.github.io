@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.2" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.3" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -16,6 +16,11 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
+      [B]v3.7.3[/B] 02/11/2026
+- CORRIGÉ le bug « erreur » sur les liens français ajoutés : [DaddyLive], (footao), [365] et leurs replis échouaient à la lecture alors que les liens un/deux/trois du guide marchaient (ex. Denver vs Kansas City). Cause : le serveur de flux de DaddyLive exige désormais l'en-tête « Origin » EN PLUS du « Referer » pour délivrer son jeton de lecture — sans lui, l'add-on tombait sur une URL refusée (« token required »).
+- FINI LES COUPURES À 2 MINUTES : le jeton de DaddyLive expire après ~2 minutes (et est lié à votre adresse IP). L'add-on embarque maintenant un mini-serveur local qui redemande un jeton neuf à CHAQUE rechargement du flux, exactement comme le lecteur du site web — la lecture continue tout un match.
+- Les segments vidéo restent servis directement par leur CDN (aucune perte de débit, rien ne transite par Internet en plus). Les sous-playlists et clés éventuelles sont gérées automatiquement.
+- En cas d'indisponibilité momentanée, le message est clair (« jeton de flux refusé — réessaie dans quelques secondes ») au lieu d'une lecture qui échoue sans explication.
       [B]v3.7.2[/B] 02/11/2026
 - Encore plus de matchs français : nouvel enrichissement par 365scores (api web publique, pays = France). Les matchs diffusés sur une vraie chaîne française mais absents de la grille DaddyLive arrivent maintenant dans « ÉVÉNEMENTS EN DIRECT » (ex. MLS sur Apple TV, NBA en saison…) — marqués « [365] », chacun doublé d'un lien « (repli) ».
 - Vérification stricte : seule une liste blanche de chaînes françaises est acceptée (Apple TV, beIN 1/2/3 + MAX, Canal+/Foot/Sport/360/F1/MotoGP, DAZN Ligue 1, RMC 1/2, Eurosport 1/2, France 2-5, TF1, M6, W9, TMC, L'Équipe, Sport en France, Automoto, 6ter, Arte, C8). Les chaînes étrangères de 365scores (Disney+, ESPN, SporTV, Antel…) sont ignorées : aucun lien non français ne peut arriver.
