@@ -17,7 +17,6 @@ from resources.modules import control, client
 from resources.modules import site_embedlivesports
 from resources.modules import site_futbollibre
 from resources.modules import site_futbolmov
-from resources.modules import site_sportonline
 
 # v3.7.6 — cache disque persistant (portage de la 3.7.4) : les caches en
 # mémoire meurent à chaque navigation Kodi (nouveau processus) et chaque
@@ -42,9 +41,6 @@ EXTRA_SITES = [site_embedlivesports, site_futbollibre]
 SITES = {s.KEY: s for s in EXTRA_SITES}
 # futbol-libre.mov: one main-menu entry -> its three lists (fmov_menu)
 SITES.update((s.KEY, s) for s in site_futbolmov.SUBSITES)
-# v3.7.12 — BÉTA SportOnline (réglage beta_sportonline) : enregistré dans
-# SITES pour réutiliser site_play (résolution + lecture) tel quel.
-SITES[site_sportonline.KEY] = site_sportonline
 
 _url = sys.argv[0]
 _handle = int(sys.argv[1])
@@ -117,14 +113,6 @@ def Main_menu():
     addDir(u'[B][COLOR white]ÉVÉNEMENTS EN DIRECT[/COLOR][/B]', Live_url, 'events', ICON, FANART, True,
            infoLabels={'title': u'Événements en direct',
                        'plot': u'Matchs en cours et à venir — grille du jour, sources françaises en priorité.'})
-    # v3.7.12 — option BÉTA (réglage « BÉTA — Source SportOnline », désactivée
-    # par défaut) : grille indépendante de DaddyLive, langue de chaque chaîne
-    # déclarée par la source. L'entrée du menu n'apparaît que si le réglage
-    # est activé : rien ne change pour l'utilisateur tant qu'il ne l'active pas.
-    if _setting_bool('beta_sportonline', 'false'):
-        addDir(u'[B][COLOR magenta]BÉTA — Matchs SportOnline[/COLOR][/B]', 'spo', 'spo_events', ICON, FANART, True,
-               infoLabels={'title': u'BÉTA — Matchs SportOnline',
-                           'plot': u"Source de test indépendante de DaddyLive : grille du jour (aujourd'hui + demain, heure UK convertie en heure locale), langue de chaque chaîne déclarée par la source (FR fiable). Désactivable dans Paramètres > « BÉTA — Source SportOnline »."})
     # addDir('[B][COLOR gold]Channels 24/7[/COLOR][/B]', 'https://1.livesoccer.sx/program.php', 14, ICON, FANART, '')
     # addDir('[B][COLOR gold]Alternative VIEW [/COLOR][/B]', '', '', ICON, FANART, '')
     # addDir('[B][COLOR gold]Alternative LIVE EVENTS[/COLOR][/B]', Alt_url, 15, ICON, FANART, '')
@@ -209,135 +197,6 @@ def _refresh_matches_bg(url):
         t.start()
     except Exception:
         pass
-
-
-# ---------------------------------------------------------------------------
-# v3.7.14 — BÉTA SportOnline INTÉGRÉE à la grille « ÉVÉNEMENTS EN DIRECT »
-# (réglage « BÉTA — Source SportOnline » activé) : les matchs de la source
-# BÉTA absents du guide (ex. Ligue 2 : Reims vs Sochaux, Red Star vs Nancy)
-# apparaissent dans la MÊME liste, au MÊME format, dé-dupliqués contre le
-# guide (mêmes équipes à ±20 min). Un problème réseau de la BÉTA n'affecte
-# jamais la grille habituelle.
-# ---------------------------------------------------------------------------
-
-def _spo_norm_title(t):
-    """Titre normalisé pour la dé-duplication (minuscules, alphanumériques)."""
-    t = _plain(t or u'').lower()
-    return re.sub(r'[^a-z0-9]+', u'', t)
-
-
-def _spo_fetch_events():
-    """Grille BÉTA avec cache disque 10 min (prog.txt change rarement en
-    journée). Retourne [] si indisponible — jamais d'exception vers la grille."""
-    events = None
-    try:
-        if fastcache is not None:
-            events = fastcache.fget('spo:prog', 600)
-    except Exception:
-        events = None
-    if events is None:
-        try:
-            events = site_sportonline.list_events()
-        except Exception as e:
-            log_info('spo merge fetch failed: {0!r}'.format(e))
-            events = []
-        try:
-            if fastcache is not None and events:
-                fastcache.fset('spo:prog', events)
-        except Exception:
-            pass
-    return events or []
-
-
-def _spo_channels_of(e):
-    """Événement BÉTA -> liste de canaux compatibles get_stream() : dicts
-    avec spo_canal (page canal à résoudre), name (chaîne), language (codes
-    CSV déclarés par la source) et spo_title (titre brut pour la lecture)."""
-    out = []
-    title = six.ensure_text(e.get('title') or u'Match', encoding='utf-8', errors='replace')
-    for srv in (e.get('servers') or []):
-        try:
-            lbl = six.ensure_text(srv[0], encoding='utf-8', errors='replace')
-            url = six.ensure_text(srv[1], encoding='utf-8', errors='replace')
-            langs = six.ensure_text(srv[2] if len(srv) > 2 else u'',
-                                    encoding='utf-8', errors='replace')
-        except Exception:
-            continue
-        out.append({'spo_canal': url, 'name': lbl, 'language': langs,
-                    'spo_title': title})
-    return out
-
-
-def _spo_merge_into_event_list(event_list, fr_only):
-    """Ajoute à la liste les matchs BÉTA absents du guide, dé-dupliqués
-    (mêmes équipes à ±20 min), habillage EXACTEMENT identique à la boucle
-    de get_events : heure cyan, équipes or, badge vert ● EN DIRECT, langues
-    magenta (fr premier en gras) — plus un badge discret [BÉTA] en bout de
-    ligne pour distinguer la source de test. Le réglage « Uniquement les
-    sources françaises » s'applique aussi ici."""
-    if not _setting_bool('beta_sportonline', 'false'):
-        return 0
-    events = _spo_fetch_events()
-    if not events:
-        return 0
-    window = 20 * 60 * 1000
-    seen = []
-    for it in event_list:
-        try:
-            seen.append((_spo_norm_title(it[5].get('title')), int(it[1])))
-        except Exception:
-            continue
-    added = 0
-    for e in events:
-        langs = [six.ensure_text(l, encoding='utf-8', errors='replace')
-                 for l in (e.get('langs') or [])]
-        if fr_only and u'fr' not in langs:
-            continue
-        ev_title = six.ensure_text(e['title'], encoding='utf-8', errors='replace')
-        try:
-            compare = int(e['start_ms'])
-        except Exception:
-            continue
-        nkey = _spo_norm_title(ev_title)
-        if any(nk == nkey and abs(c - compare) <= window for nk, c in seen):
-            continue          # déjà dans le guide (même équipes, même créneau)
-        seen.append((nkey, compare))
-        is_live = e.get('status') == 'live'
-        emo = _sport_emoji(e.get('sport'), ev_title)
-        if is_live:
-            m_color = 'lime'
-            state = u' [COLOR lime][B]● EN DIRECT[/B][/COLOR]'
-        else:
-            m_color = 'gold'
-            state = u''
-        cnt = u''
-        if _setting_bool('show_langs'):
-            cnt = _lang_suffix(langs)
-        ftime = time_convert(compare / 1000)
-        ftime_s = u'[COLOR cyan]{}[/COLOR]'.format(ftime)
-        name = u'{0}{1} [COLOR {2}][B]{3}[/B][/COLOR]{4}{5} [COLOR magenta][BÉTA][/COLOR]'.format(
-            (emo + u' ') if emo else u'', ftime_s, m_color, ev_title, state, cnt)
-        # fiche du match (infoLabels) — mêmes lignes que la grille + source
-        spo_sport = six.ensure_text(e.get('sport') or u'Sport',
-                                    encoding='utf-8', errors='replace') or u'Sport'
-        plot = [u'{0} — BÉTA SportOnline'.format(spo_sport)]
-        plot.append(u'Début : {0}{1}'.format(_plain(ftime),
-                                             u' — en direct' if is_live else u''))
-        spo_channels = _spo_channels_of(e)
-        chan_names = []
-        for ch in spo_channels:
-            lg = ch['language'].replace(',', ' ')
-            chan_names.append(u'{0} ({1})'.format(ch['name'], lg) if lg else ch['name'])
-        if chan_names:
-            plot.append(u'Chaînes : ' + u', '.join(chan_names))
-        plot.append(u'Source de test indépendante de DaddyLive (BÉTA).')
-        info = {'title': _plain(ev_title), 'plot': u'\n'.join(plot),
-                'genre': spo_sport}
-        event_list.append([name, compare, spo_channels, ICON, spo_sport, info])
-        added += 1
-    if added:
-        log_info('spo merge: {0} match(s) BETA ajoutes a la grille'.format(added))
-    return added
 
 
 def get_events(url):  # 5
@@ -468,12 +327,6 @@ def get_events(url):  # 5
         event_list.append([name, compare, channels, icon, sport, info])
 
         # streams = str(quote(base64.b64encode(six.ensure_binary(str(streams)))))
-    # v3.7.14 — BÉTA SportOnline : les matchs de la source BÉTA absents du
-    # guide (ex. Ligue 2 : Reims vs Sochaux) sont intégrés À CETTE MÊME
-    # LISTE (réglage « BÉTA — Source SportOnline »), dé-dupliqués contre le
-    # guide, même habillage ; un problème réseau de la BÉTA n'affecte pas
-    # la grille habituelle.
-    _spo_merge_into_event_list(event_list, fr_only)
     if not event_list:
         if fastcache is not None:
             fastcache.flush()          # persister la liste mise en cache
@@ -839,33 +692,6 @@ def get_stream(name, url):  # 4
                 sstreams.append((link, _chan_label(chan, lang, fr)))
 
         else:
-            # v3.7.14 — canal BÉTA SportOnline (dict avec spo_canal) : la
-            # langue est DÉCLARÉE par la source (« fr,es ») -> test direct,
-            # et la lecture passe par le résolveur site_play (module
-            # site_sportonline), pas par resolve2 (résolveur DaddyLive).
-            if event.get('spo_canal'):
-                langs = [l for l in six.ensure_text(
-                    event.get('language', ''), encoding='utf-8',
-                    errors='replace').split(',') if l]
-                fr = u'fr' in langs
-                if fr_only and not fr:
-                    continue
-                chan = six.ensure_text(event.get('name', 'HD'),
-                                       encoding='utf-8', errors='replace')
-                if fr:
-                    tag = u'[COLOR lime]FR[/COLOR]'
-                elif langs:
-                    tag = u'[COLOR dimgray]{0}[/COLOR]'.format(
-                        u' '.join(l.upper() for l in langs))
-                else:
-                    tag = u''
-                label = u'[COLOR gold]{0}[/COLOR]{1}'.format(chan, u' ' + tag if tag else u'')
-                payload = json.dumps({'k': 'spo',
-                                      'u': six.ensure_text(event.get('spo_canal'), encoding='utf-8', errors='replace'),
-                                      't': six.ensure_text(event.get('spo_title') or u'', encoding='utf-8', errors='replace'),
-                                      'p': ''})
-                sstreams.append((payload, label))
-                continue
             fr = _is_french_source(event.get('name'), event.get('language'))
             if fr_only and not fr:
                 continue
@@ -891,26 +717,19 @@ def get_stream(name, url):  # 4
             # (un/deux/trois) en gris discret, fiche en texte propre.
             for idx, i in enumerate(sstreams, 1):
                 title, link = i[1], i[0]
-                # v3.7.14 — payload JSON = canal BÉTA SportOnline -> résolveur
-                # site_play ; sinon lien brut -> résolveur DaddyLive.
-                is_spo = link.startswith('{')
-                lbl = _link_label(link) if not is_spo else None
+                lbl = _link_label(link)
                 if lbl and 'vecdn' not in link and str(link) != str(title):
                     title = u'{0} [COLOR dimgray]· {1}[/COLOR]'.format(title, lbl)
                 num = u'[COLOR dimgray]{0}.[/COLOR] '.format(idx)
                 info = {'title': _plain(title), 'sorttitle': '', 'plot': _plain(name)}
-                addDir(num + title, link, 'site_play' if is_spo else 'play_stream',
-                       ICON, name, isFolder=False, infoLabels=info)
+                addDir(num + title, link, 'play_stream', ICON, name,
+                       isFolder=False, infoLabels=info)
             xbmcplugin.setContent(_handle, 'videos')
             xbmcplugin.endOfDirectory(_handle)
 
         else:
             link = sstreams[0][0]
-            # v3.7.14 — payload JSON = canal BÉTA SportOnline -> site_play
-            if link.startswith('{'):
-                site_play(link)
-            else:
-                resolve2(name, link)
+            resolve2(name, link)
 
 
 def xbmc_curl_encode(url, headers):
@@ -1648,143 +1467,6 @@ def _add_site_event(key, site, e):
     addDir(label, payload, 'site_streams', e['poster'] or ICON, e['title'], True)
 
 
-# ---------------------------------------------------------------------------
-# v3.7.12 — BÉTA « SportOnline » (réglage beta_sportonline, désactivé par
-# défaut) : source de test INDÉPENDANTE de DaddyLive. Grille texte du jour
-# (sportsonline.st/prog.txt) où chaque chaîne DÉCLARE sa langue (« HD4 GREEK
-# & FRENCH ») -> détection FR fiable. Affichage calqué sur get_events()
-# (heure cyan, équipes or, langues magenta, ● EN DIRECT), liste de liens
-# numérotée comme get_stream(), lecture via site_play (résolveur du module
-# site_sportonline). Rien ne change tant que le réglage reste désactivé.
-# ---------------------------------------------------------------------------
-
-
-def spo_events_menu():
-    if not _setting_bool('beta_sportonline', 'false'):
-        control.infoDialog(u"[COLOR gold]Source BÉTA désactivée — active « BÉTA — Source SportOnline » dans Paramètres.[/COLOR]",
-                           NAME, ICON, 5000)
-        xbmcplugin.endOfDirectory(_handle)
-        return
-    try:
-        events = site_sportonline.list_events()
-    except Exception as e:
-        log_info('spo events failed: {0!r}'.format(e))
-        events = []
-    if not events:
-        control.infoDialog(u"[COLOR red]Grille BÉTA SportOnline indisponible pour le moment (réseau ?).[/COLOR]",
-                           NAME, ICON, 5000)
-        xbmcplugin.endOfDirectory(_handle)
-        return
-    fr_only = _french_only()
-    event_list = []
-    filtered_out = 0
-    for e in events:
-        langs = [six.ensure_text(l, encoding='utf-8', errors='replace')
-                 for l in (e.get('langs') or [])]
-        if fr_only and u'fr' not in langs:
-            filtered_out += 1
-            continue
-        # habillage identique à get_events() (3.7.11) : heure cyan, équipes
-        # or, badge EN DIRECT, langues magenta (fr premier, en gras)
-        compare = int(e['start_ms'])
-        ftime = time_convert(compare / 1000)
-        is_live = e.get('status') == 'live'
-        emo = _sport_emoji(e.get('sport'), e.get('title'))
-        if is_live:
-            m_color = 'lime'
-            state = u' [COLOR lime][B]● EN DIRECT[/B][/COLOR]'
-        else:
-            m_color = 'gold'
-            state = u''
-        cnt = u''
-        if _setting_bool('show_langs'):
-            cnt = _lang_suffix(langs)
-        ev_title = six.ensure_text(e['title'], encoding='utf-8', errors='replace')
-        ftime_s = u'[COLOR cyan]{}[/COLOR]'.format(ftime)
-        name = u'{0}{1} [COLOR {2}][B]{3}[/B][/COLOR]{4}{5}'.format(
-            (emo + u' ') if emo else u'', ftime_s, m_color, ev_title, state, cnt)
-        # fiche du match (infoLabels) — même structure que get_events()
-        plot = [u'BÉTA SportOnline — {0}'.format(
-            six.ensure_text(e.get('sport') or u'Sport', encoding='utf-8', errors='replace'))]
-        plot.append(u'Début : {0}{1}'.format(_plain(ftime),
-                                             u' — en direct' if is_live else u''))
-        chan_names = []
-        for srv in (e.get('servers') or []):
-            try:
-                lbl = six.ensure_text(srv[0], encoding='utf-8', errors='replace')
-                langs_s = six.ensure_text(srv[2] if len(srv) > 2 else u'',
-                                          encoding='utf-8', errors='replace').replace(',', ' ')
-                chan_names.append(u'{0} ({1})'.format(lbl, langs_s) if langs_s else lbl)
-            except Exception:
-                continue
-        if chan_names:
-            plot.append(u'Chaînes : ' + u', '.join(chan_names))
-        plot.append(u'Source de test indépendante de DaddyLive (réglage BÉTA).')
-        info = {'title': _plain(ev_title), 'plot': u'\n'.join(plot),
-                'genre': six.ensure_text(e.get('sport') or u'Sport',
-                                         encoding='utf-8', errors='replace') or u'Sport'}
-        event_list.append([name, compare, e.get('servers') or [], info])
-    if not event_list:
-        if filtered_out:
-            control.infoDialog(u"[COLOR gold]Aucune chaîne française dans la grille BÉTA du moment.[/COLOR]",
-                               NAME, ICON, 6000)
-        else:
-            control.infoDialog(u"[COLOR gold]Grille BÉTA vide pour le moment.[/COLOR]", NAME, ICON, 5000)
-        xbmcplugin.endOfDirectory(_handle)
-        return
-    event_list.sort(key=lambda x: x[1])
-    for ev in event_list:
-        payload = json.dumps({'t': ev[3].get('title') or u'', 's': ev[2]})
-        addDir(ev[0], payload, 'spo_streams', ICON, FANART, True, infoLabels=ev[3])
-    xbmcplugin.setContent(_handle, 'videos')
-    xbmcplugin.endOfDirectory(_handle)
-
-
-def spo_streams_menu(payload):
-    d = json.loads(payload)
-    title = six.ensure_text(d.get('t') or u'Match', encoding='utf-8', errors='replace')
-    fr_only = _french_only()
-    items = []
-    for idx, srv in enumerate(d.get('s') or [], 1):
-        try:
-            lbl = six.ensure_text(srv[0], encoding='utf-8', errors='replace')
-            url = six.ensure_text(srv[1], encoding='utf-8', errors='replace')
-            langs = [l for l in six.ensure_text(srv[2] if len(srv) > 2 else u'',
-                                                encoding='utf-8', errors='replace').split(',') if l]
-        except Exception:
-            continue
-        fr = u'fr' in langs
-        if fr_only and not fr:
-            continue
-        # même style que get_stream() : numéro discret, chaîne en or,
-        # langue française en VERT (étrangère en gris), hôte en gris
-        if fr:
-            tag = u'[COLOR lime]FR[/COLOR]'
-        elif langs:
-            tag = u'[COLOR dimgray]{0}[/COLOR]'.format(
-                u' '.join(l.upper() for l in langs))
-        else:
-            tag = u''
-        t = u'[COLOR gold]{0}[/COLOR]{1}'.format(lbl, u' ' + tag if tag else u'')
-        hostlbl = _link_label(url)
-        if hostlbl:
-            t = u'{0} [COLOR dimgray]· {1}[/COLOR]'.format(t, hostlbl)
-        num = u'[COLOR dimgray]{0}.[/COLOR] '.format(idx)
-        info = {'title': _plain(t), 'sorttitle': '', 'plot': title}
-        items.append((num + t, json.dumps({'k': site_sportonline.KEY, 'u': url,
-                                           't': title, 'p': ''}), info))
-    if not items:
-        control.infoDialog(u"[COLOR gold]Aucune chaîne française pour ce match (BÉTA).[/COLOR]\n"
-                           u"[COLOR lime]Réglage : « Uniquement les sources françaises ».[/COLOR]",
-                           NAME, ICON, 7000)
-        xbmcplugin.endOfDirectory(_handle)
-        return
-    for lbl, url, info in items:
-        addDir(lbl, url, 'site_play', ICON, title, isFolder=False, infoLabels=info)
-    xbmcplugin.setContent(_handle, 'videos')
-    xbmcplugin.endOfDirectory(_handle)
-
-
 def fmov_menu():
     for s in site_futbolmov.SUBSITES:
         addDir(u'[B][COLOR deepskyblue]{0}[/COLOR][/B]'.format(s.NAME), s.KEY,
@@ -1967,11 +1649,6 @@ def router(paramstring):
             site_streams_menu(params['url'])
         elif params['mode'] == 'site_play':
             site_play(params['url'])
-        elif params['mode'] == 'spo_events':
-            # v3.7.12 — BÉTA SportOnline (réglage beta_sportonline)
-            spo_events_menu()
-        elif params['mode'] == 'spo_streams':
-            spo_streams_menu(params['url'])
     else:
         Main_menu()
 
