@@ -57,7 +57,8 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.1" provider-name="chakir1981">
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.2" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -74,6 +75,12 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
+      [B]v3.7.2[/B] 02/11/2026
+- Encore plus de matchs français : nouvel enrichissement par 365scores (api web publique, pays = France). Les matchs diffusés sur une vraie chaîne française mais absents de la grille DaddyLive arrivent maintenant dans « ÉVÉNEMENTS EN DIRECT » (ex. MLS sur Apple TV, NBA en saison…) — marqués « [365] », chacun doublé d'un lien « (repli) ».
+- Vérification stricte : seule une liste blanche de chaînes françaises est acceptée (Apple TV, beIN 1/2/3 + MAX, Canal+/Foot/Sport/360/F1/MotoGP, DAZN Ligue 1, RMC 1/2, Eurosport 1/2, France 2-5, TF1, M6, W9, TMC, L'Équipe, Sport en France, Automoto, 6ter, Arte, C8). Les chaînes étrangères de 365scores (Disney+, ESPN, SporTV, Antel…) sont ignorées : aucun lien non français ne peut arriver.
+- Anti faux positifs : un match n'est retenu que si les DEUX équipes correspondent ET que l'horaire concorde (± 3 h 30) — un même club jouant deux fois dans la journée ne peut pas être confondu.
+- La chaîne Apple TV est retrouvée dynamiquement dans la grille du jour (son identifiant change chaque jour, jamais codé en dur). Cache 30 min, repli silencieux si l'api est en panne : le menu reste identique.
+- La règle stricte 3.7.0 est conservée : un match 365scores est une diffusion française VÉRIFIÉE (api pays France), donc principal + repli suffisent à l'afficher ; tout le reste exige toujours le trio un/deux/trois.
       [B]v3.7.1[/B] 02/11/2026
 - Fini les liens polonais dans le mode « Uniquement les sources françaises » : les chaînes Canal+ Sport 3, Canal+ Sport 5, Canal+ 1, etc. numérotées sont des chaînes ÉTRANGÈRES (Ekstraklasa polonaise…) — la France n'a que Canal+ Sport et Canal+ Sport 360. Elles sont maintenant rejetées, même si leur nom contient « Canal+ ».
 - Double protection : 1) un code langue explicite du guide (PL, US, GB, DE…) rejette la chaîne avant tout test de nom ; 2) le filtre par nom n'accepte plus un « Canal+ » suivi d'un numéro (sauf Canal+ Sport 360 / Afrique).

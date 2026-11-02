@@ -18,6 +18,7 @@ from resources.modules import site_embedlivesports
 from resources.modules import site_futbollibre
 from resources.modules import site_futbolmov
 from resources.modules import site_daddylive
+from resources.modules import site_365
 import time
 from dateutil.parser import parse
 from dateutil.tz import gettz
@@ -208,6 +209,34 @@ def get_events(url):  # 5
             channels.append({'channelName': u'%s (repli)' % label, 'language': 'fr',
                              'links': [dl_url], 'dl': 1, 'f': 1})
 
+        # v3.7.2 — enrichissement 365scores : matchs diffusés sur une chaîne
+        # française VÉRIFIÉE par 365scores (api web publique, pays France)
+        # mais absents de la grille DaddyLive (ex. MLS sur Apple TV). Liste
+        # blanche stricte : une chaîne inconnue est ignorée, jamais un lien
+        # étranger injecté. Actif seulement en mode « sources françaises ».
+        if fr_only and team1 and team2 and compare != int('999999999999'):
+            try:
+                ex_links = site_365.fr_links_for(team1, team2, compare)
+            except Exception:
+                ex_links = []
+            have_ids = set()
+            for _n, u_ in dl_links:
+                mi_ = re.search(r'id=(\d+)', u_ or '')
+                if mi_:
+                    have_ids.add(mi_.group(1))
+            for ex_name, ex_url in ex_links:
+                mi_ = re.search(r'id=(\d+)', ex_url or '')
+                if mi_ and mi_.group(1) in have_ids:
+                    continue  # chaîne déjà présente via la grille/footao
+                label = u'%s [365]' % ex_name
+                channels.append({'channelName': label, 'language': 'fr',
+                                 'links': [ex_url], 'dl': 1, 'v365': 1})
+                channels.append({'channelName': u'%s (repli)' % label,
+                                 'language': 'fr', 'links': [ex_url],
+                                 'dl': 1, 'v365': 1, 'f': 1})
+                if mi_:
+                    have_ids.add(mi_.group(1))
+
         # v3.7.0 — règle stricte : le match doit être diffusé sur une vraie
         # chaîne française du guide (avec son trio de liens un/deux/trois).
         # Les entrées DaddyLive injectées ne qualifient plus un match.
@@ -360,12 +389,23 @@ def _channels_have_french_trio(channels):
     affichés « un / deux / trois » = 1 / 2 / 3). Un match sans chaîne FR
     du guide mais seulement doublé d'une entrée DaddyLive (principale +
     repli, ex. NFL Sunday Ticket sur un match NFL) n'afficherait que 2
-    liens : il reste masqué quand le réglage est actif."""
+    liens : il reste masqué quand le réglage est actif.
+    v3.7.2 — exception contrôlée : une chaîne marquée v365 est une
+    diffusion française VÉRIFIÉE par 365scores (api publique, pays France,
+    liste blanche stricte). Le match est diffusé en France pour de vrai :
+    principal + repli suffisent, pas besoin du trio de miroirs."""
     for ch in channels:
-        if not isinstance(ch, dict) or ch.get('dl'):
-            continue  # les entrées DaddyLive injectées ne qualifient pas
+        if not isinstance(ch, dict):
+            continue
         links = ch.get('links') or []
         name = ch.get('channelName') or ch.get('name')
+        if ch.get('v365'):
+            # v3.7.2 — chaîne FR vérifiée 365scores : diffusion FR attestée
+            if links and _is_french_source(name, ch.get('language')):
+                return True
+            continue
+        if ch.get('dl'):
+            continue  # les entrées DaddyLive injectées ne qualifient pas
         if len(links) >= 3 and _is_french_source(name, ch.get('language')):
             return True
     return False
