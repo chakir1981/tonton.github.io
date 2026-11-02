@@ -62,7 +62,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.21" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.22" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -79,6 +79,14 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
+      [B]v3.7.22[/B] 03/11/2026
+- OUVERTURE DES VIDÉOS BIEN PLUS RAPIDE : dès l'affichage de la liste des liens d'un match, le premier flux se résout EN ARRIRÈRE-PLAN — au clic, il est déjà prêt (gain typique : 2 à 4 s, jusqu'à 8 s quand le premier miroir traîne).
+- MÉMOIRE DU FLUX RÉSOLU (3 min) : un 2e clic sur le même lien (mauvais miroir, reprise après coupure) redémarre sans nouvelle résolution — avant, tout était recalculé à chaque fois.
+- MIROIRS TESTÉS EN MÊME TEMPS : l'étape d'extraction du flux interroge maintenant les 4 miroirs (un/deux/trois et leurs variantes s1-s3) EN PARALLÈLE et prend le premier qui répond dans l'ordre de priorité — un miroir muet n'ajoute plus 2 requêtes pleines (gain : 3 à 6 s dans les cas difficiles).
+- SONDES CDN EN PARALLÈLE + TIMEOUT 12 s → 6 s sur les vérifications de serveurs : les cas pathologiques (serveur mort) passent de 30-40 s à quelques secondes.
+- GRILLE RESSERRÉE : nouveau réglage « Masquer les matchs terminés » (ACTIVÉ par défaut) — le samedi après-midi, les matchs gris « fini » ne s'empilent plus en tête de liste ; seuls restent les matchs EN DIRECT et à venir. Désactivable dans Paramètres.
+- LIEN MORT ? BASCULE AUTOMATIQUE : nouveau réglage « Si un lien ne répond pas, essayer automatiquement le suivant » (ACTIVÉ par défaut) — plus besoin de revenir en arrière et de re-cliquer à la main, l'add-on essaie le lien 2 puis le 3 tout seul (au plus 3 essais), avec un message « Lien 1 inaccessible — essai du lien 2… ».
+- Les 2 nouveaux réglages sont dans Paramètres > Réglages (les deux activés par défaut) ; « Uniquement les sources françaises » et le fuseau horaire ne changent pas. Toujours SANS aucun lien ajouté : mêmes matchs, mêmes liens d'origine du guide.
       [B]v3.7.21[/B] 03/11/2026
 - SUPPRESSION DU MENU « CHAÎNES FR (24h/24) » (à la demande de l'utilisateur) : l'entrée disparaît du menu, la liste des chaînes françaises en continu et leur code ne sont plus proposés — les chaînes FR continuent d'apparaître NORMALEMENT dans la grille « MATCHS » quand elles diffusent un match, comme avant la 3.7.20.
 - Rien d'autre ne change : mêmes matchs, mêmes liens d'origine du guide, langues dans le titre (FR en premier), réglages identiques (Uniquement les sources françaises, fuseau horaire), toujours SANS aucun lien ajouté.

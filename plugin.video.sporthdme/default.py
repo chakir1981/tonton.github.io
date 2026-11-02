@@ -235,6 +235,7 @@ def get_events(url):  # 5
         now_time_in_ms = datetime.now().timestamp() * 1000
     fr_only = _french_only()
     filtered_out = 0
+    hidden_finished = 0
     for match in matches:
         channels = match.get("channels", [])
         if fr_only and not _channels_have_french(channels):
@@ -272,6 +273,12 @@ def get_events(url):  # 5
         if compare <= now_time_in_ms <= compare + duration_in_ms:
             is_live = True
         finished = (not is_live) and now_time_in_ms > compare + duration_in_ms
+        # v3.7.22 — « Masquer les matchs terminés » (activé par défaut) : la
+        # liste reste resserrée sur les matchs EN DIRECT et à venir ; le
+        # réglage retiré les réaffiche.
+        if finished and _hide_finished():
+            hidden_finished += 1
+            continue
 
         # v3.7.16 — les icônes emoji des sports sont RETIRÉES (elles ne
         # s'affichaient pas sur plusieurs appareils Kodi/Android : aucune
@@ -333,6 +340,9 @@ def get_events(url):  # 5
             fastcache.flush()          # persister la liste mise en cache
         if filtered_out:
             control.infoDialog(u"[COLOR gold]Aucune source française parmi les matchs du moment.[/COLOR]", NAME, ICON, 6000)
+        elif hidden_finished:
+            control.infoDialog(u"[COLOR gold]Tous les matchs du moment sont terminés (masqués).[/COLOR]\n"
+                               u"[COLOR lime]Réglage : « Masquer les matchs terminés ».[/COLOR]", NAME, ICON, 7000)
         return
     # v3.7.8 — tri par heure (comme avant) ou groupement par sport (réglage)
     if False:  # v3.7.20 — jamais de groupement par sport (réglage retiré des Paramètres)
@@ -430,6 +440,17 @@ def _french_only():
     """Réglage « Uniquement les sources françaises » (activé par défaut)."""
     try:
         return (ADDON.getSetting('french_only') or 'true').lower() == 'true'
+    except Exception:
+        return True
+
+
+def _hide_finished():
+    """v3.7.22 — réglage « Masquer les matchs terminés » (activé par défaut :
+    le samedi après-midi, des dizaines de matchs gris « fini » s'empilent en
+    tête de la grille, triée chronologiquement, avant les matchs en direct
+    et à venir)."""
+    try:
+        return (ADDON.getSetting('hide_finished') or 'true').strip().lower() == 'true'
     except Exception:
         return True
 
@@ -684,6 +705,10 @@ def get_stream(name, url):  # 4
         if len(sstreams) > 1:
             # v3.7.8 — liens numérotés (1. 2. 3.…) pour s'y retrouver, miroir
             # (un/deux/trois) en gris discret, fiche en texte propre.
+            # v3.7.22 — chaque entrée porte le paquet complet des liens du
+            # match ({"l": […], "i": rang cliqué}) : si le lien cliqué est
+            # mort, la lecture bascule automatiquement sur le suivant.
+            links_all = [i[0] for i in sstreams]
             for idx, i in enumerate(sstreams, 1):
                 title, link = i[1], i[0]
                 lbl = _link_label(link)
@@ -691,8 +716,12 @@ def get_stream(name, url):  # 4
                     title = u'{0} [COLOR dimgray]· {1}[/COLOR]'.format(title, lbl)
                 num = u'[COLOR dimgray]{0}.[/COLOR] '.format(idx)
                 info = {'title': _plain(title), 'sorttitle': '', 'plot': _plain(name)}
-                addDir(num + title, link, 'play_stream', ICON, name,
+                addDir(num + title, json.dumps({'l': links_all, 'i': idx - 1}),
+                       'play_stream', ICON, name,
                        isFolder=False, infoLabels=info)
+            # v3.7.22 — pré-résolution du premier lien en ARRIÈRE-PLAN : le
+            # flux est prêt (cache 3 min) avant même le clic.
+            _prewarm_link(name, links_all[0])
             xbmcplugin.setContent(_handle, 'videos')
             xbmcplugin.endOfDirectory(_handle)
 
@@ -705,10 +734,12 @@ def xbmc_curl_encode(url, headers):
     return "{}|{}".format(url, urlencode(headers))
 
 
-def _resolve2_impl(name, url):
+def _resolve2_impl(name, url, quiet=False):
     """v3.7.8 : extrait l'URL finale du flux et la RETOURNE (la lecture,
     elle, est faite par resolve2() qui affiche la roue d'attente pendant
-    l'extraction)."""
+    l'extraction). v3.7.22 : quiet=True (pré-résolution en arrière-plan)
+    supprime tout accès à l'interface (notifications, fenêtres de debug) —
+    un thread d'arrière-plan ne doit jamais toucher à l'écran."""
     stream_url = ''
     ua_win = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/77.0.3865.120 Safari/537.36'
     ua = 'Mozilla/5.0 (iPad; CPU OS 15_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.6.1 Mobile/15E148 Safari/604.1'
@@ -720,7 +751,8 @@ def _resolve2_impl(name, url):
 
     # NEW GLISCO/SANSAT BRANCH
     if '//glisco' in url or '//sansat' in url or 'vertex' in url or 'nexa' in url or 'kora.st' in url:
-        Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
+        if not quiet:
+            Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
         chan_id = url.split('id=')[-1]
 
         def _extract_stream(embed_html):
@@ -816,23 +848,29 @@ def _resolve2_impl(name, url):
                 for _h in to_fetch:
                     _grab(_h)
 
-        flink = None
-        frame = None
-        for host in hosts:
+        # v3.7.22 — phase 2 (extraction du flux) en SALVE PARALLÈLE : tous
+        # les miroirs sont testés EN MÊME TEMPS (cfg ?ppcfg=1, puis page du
+        # cadre), et le premier qui rend un flux dans l'ordre de priorité
+        # des miroirs gagne. Avant : miroirs interrogés l'un après l'autre —
+        # un miroir muet (TLS bloqué) ajoutait 2 requêtes pleines avant
+        # d'atteindre le bon (3 à 6 s perdus).
+        def _phase2(h):
             try:
-                api_ref = '{0}://{1}/'.format(uri0.scheme, host)
-                api_resp = api_results.get(host)
+                api_ref = '{0}://{1}/'.format(uri0.scheme, h)
+                api_resp = api_results.get(h)
                 if not api_resp:
                     # ni cache ni salve : un ultime essai direct, vite abandonné
                     api_resp = six.ensure_text(client.request(
-                        '{0}://{1}/api/player.php?id={2}'.format(uri0.scheme, host, chan_id),
-                        referer=api_ref, timeout='12') or '')
+                        '{0}://{1}/api/player.php?id={2}'.format(uri0.scheme, h, chan_id),
+                        referer=api_ref, timeout='6') or '')
+                if not api_resp:
+                    return None
                 cand_frame = json.loads(api_resp)['url']
                 cfg_url = cand_frame + ('&' if '?' in cand_frame else '?') + 'ppcfg=1&_=' + str(int(_time.time() * 1000))
                 try:
                     embed_html = six.ensure_str(
                         client.request(cfg_url, referer=api_ref, headers={'User-Agent': ua_win},
-                                       timeout='12') or '')
+                                       timeout='8') or '')
                 except Exception:
                     embed_html = ''  # e.g. 403 on ?ppcfg=1 -> plain page below
                 method, cand = _extract_stream(embed_html)
@@ -840,20 +878,29 @@ def _resolve2_impl(name, url):
                     try:
                         method, cand = _extract_stream(six.ensure_str(
                             client.request(cand_frame, referer=api_ref,
-                                           headers={'User-Agent': ua_win}, timeout='12')))
+                                           headers={'User-Agent': ua_win}, timeout='8')))
                     except Exception:
                         pass
-                frame_host = urlparse(cand_frame).netloc
                 if cand:
-                    flink = cand
-                    frame = cand_frame
-                    log_info('mirror {0} -> {1}: OK via {2}'.format(host, frame_host, method))
-                    break
+                    return (h, cand_frame, cand, method)
                 log_info('mirror {0} -> {1}: no stream ({2})'.format(
-                    host, frame_host, method or 'unknown player'))
+                    h, urlparse(cand_frame).netloc, method or 'unknown player'))
             except Exception as _me:
-                log_info('mirror {0}: error {1!r}'.format(host, _me))
-                continue
+                log_info('mirror {0}: error {1!r}'.format(h, _me))
+            return None
+
+        if fastcache is not None:
+            phase2 = fastcache.map_calls([lambda h=h: _phase2(h) for h in hosts],
+                                         workers=4)
+        else:
+            phase2 = [_phase2(h) for h in hosts]
+        pick = next((r for r in phase2 if r), None)
+        flink = None
+        frame = None
+        if pick:
+            _phost, frame, flink, _pmethod = pick
+            log_info('mirror {0} -> {1}: OK via {2}'.format(
+                _phost, urlparse(frame).netloc, _pmethod))
         if not flink:
             raise Exception('could not extract stream src for ' + url)
 
@@ -872,7 +919,8 @@ def _resolve2_impl(name, url):
         stream_url = xbmc_curl_encode(flink, stream_headers)
 
     elif any(i in url for i in resolved):
-        Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
+        if not quiet:
+            Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
         referer = '{uri.scheme}://{uri.netloc}/'.format(uri=urlparse(url))
         r = six.ensure_str(client.request(url, timeout='12'))
         if 'get_content.php?channel=' in r or 'api/player.php?id=' in r:
@@ -946,7 +994,10 @@ def _resolve2_impl(name, url):
                             data_page = json.loads(data_page)
                             flink = data_page['props']['streamData']['streamurl']
                     else:
-                        xbmcgui.Dialog().textviewer('data', str(data))
+                        if quiet:
+                            log_debug('hlsjsConfig data kept for log ({0} chars)'.format(len(data)))
+                        else:
+                            xbmcgui.Dialog().textviewer('data', str(data))
                         hlsurl, pk, ea = \
                             re.findall('.*hlsUrl\s*=\s*"(.*?&\w+=)".*?var\s+\w+\s*=\s*"([^"]+).*?>\s*ea\s*=\s*"([^"]+)',
                                        data,
@@ -956,7 +1007,10 @@ def _resolve2_impl(name, url):
                         link_data = six.ensure_str(client.request(link, timeout='12'))
                         flink = re.findall('.*(http.+?$)', link_data)[0]
                 except Exception as e:
-                    xbmcgui.Dialog().textviewer('e', str(e))
+                    if quiet:
+                        log_debug('hlsjsConfig fallback: {0!r}'.format(e))
+                    else:
+                        xbmcgui.Dialog().textviewer('e', str(e))
                     flink = re.findall(r'''src=\s*["'](.+?)['"]''', data, re.DOTALL)[0]
             elif 'new Clappr' in data:
                 flink = re.findall(r'''source\s*:\s*["']?(.+?)['"]?\,''', str(data), re.DOTALL)[0]
@@ -1030,17 +1084,33 @@ def _resolve2_impl(name, url):
                         ]
 
                     candidates = [re.sub(r'(?<!:)/{2,}', '/', u) for u in candidates]
-                    working = None
-                    for u in candidates:
+
+                    # v3.7.22 — sondes CDN EN PARALLÈLE, timeout 6 s (avant :
+                    # 12 s chacune, l'une après l'autre — un serveur mort
+                    # faisait attendre jusqu'à 3 sondes pleines avant que la
+                    # bonne adresse ne soit essayée). Priorité conservée : la
+                    # première adresse qui répond dans l'ordre de la liste
+                    # gagne.
+                    def _probe(u):
                         try:
-                            chunk = client.request(u, referer=ref_for_headers, timeout='12')
+                            chunk = client.request(u, referer=ref_for_headers, timeout='6')
                             s = six.ensure_str(chunk) if chunk is not None else ''
                             if s.startswith('#EXTM3U') or len(s) > 0:
-                                working = u
-                                break
+                                return u
                         except Exception as e:
                             log_debug('probe fail: {0} -> {1}'.format(u, e))
-                            continue
+                        return None
+
+                    if fastcache is not None:
+                        probed = fastcache.map_calls(
+                            [lambda u=u: _probe(u) for u in candidates], workers=4)
+                        working = next((u for u in probed if u), None)
+                    else:
+                        working = None
+                        for u in candidates:
+                            working = _probe(u)
+                            if working:
+                                break
 
                     if not working:
                         working = candidates[0]
@@ -1076,7 +1146,8 @@ def _resolve2_impl(name, url):
                               'Connection': 'keep-alive'}
             stream_url = xbmc_curl_encode(flink, stream_headers)
     elif '//dabac' in url:
-        Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
+        if not quiet:
+            Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
         referer = '{uri.scheme}://{uri.netloc}/'.format(uri=urlparse(url))
         frame = referer + "api/player.php?id={}"
         id = url.split("id=")[-1]
@@ -1109,15 +1180,148 @@ def _resolve2_impl(name, url):
     return stream_url
 
 
+# ---------------------------------------------------------------------------
+# v3.7.22 — vitesse d'ouverture des vidéos
+#   • cache « res: » (3 min) du flux résolu : un 2e clic (mauvais miroir,
+#     reprise après coupure) ne re-résout plus rien ;
+#   • pré-résolution en arrière-plan du 1er lien dès l'affichage de la liste
+#     des liens du match : le flux est prêt avant même le clic ;
+#   • bascule automatique sur le lien suivant quand le lien cliqué est mort
+#     (paquet {"l": [liens], "i": rang} porté par chaque entrée de lecture).
+# ---------------------------------------------------------------------------
+_RES_TTL = 180              # durée (s) du cache du flux résolu
+_RES_INFLIGHT = set()       # pré-résolutions déjà en cours (anti-doublon)
+_RES_LOCK = threading.Lock()
+
+
+def _auto_next():
+    """Réglage « Si un lien ne répond pas, essayer automatiquement le
+    suivant » (activé par défaut)."""
+    try:
+        return (ADDON.getSetting('auto_next') or 'true').strip().lower() == 'true'
+    except Exception:
+        return True
+
+
+def _parse_play_payload(url):
+    """L'entrée d'une lecture est soit le lien brut, soit un paquet JSON
+    {"l": [liens dans l'ordre affiché], "i": rang du lien cliqué}. Le paquet
+    porte la liste complète du match pour la bascule automatique. Retourne
+    (liste_liens, rang_0) — lien brut -> ([lien], 0)."""
+    if url and url.startswith('{'):
+        try:
+            d = json.loads(url)
+            lst = [six.ensure_text(x, encoding='utf-8', errors='replace')
+                   for x in (d.get('l') or []) if x]
+            if lst:
+                i = d.get('i', 0)
+                try:
+                    i = int(i)
+                except Exception:
+                    i = 0
+                if i < 0 or i >= len(lst):
+                    i = 0
+                return lst, i
+        except Exception:
+            pass
+    return [url], 0
+
+
+def _resolve2_cached(name, link, quiet=False):
+    """Résolution avec cache « res: » (3 min). Les en-têtes étant inclus
+    dans l'URL finale (convention Kodi « url|Referer=… »), le flux en cache
+    est jouable tel quel."""
+    ck = 'res:' + link
+    cached = fastcache.fget(ck, _RES_TTL) if fastcache is not None else None
+    if cached:
+        log_info('RESOLVE-CACHE hit: {0}'.format(link[:70]))
+        return cached
+    stream_url = _resolve2_impl(name, link, quiet=quiet)
+    if stream_url and fastcache is not None:
+        fastcache.fset(ck, stream_url)
+        fastcache.flush()
+    return stream_url
+
+
+def _prewarm_link(name, link):
+    """Pré-résolution en ARRIÈRE-PLAN du premier lien d'un match, lancée dès
+    l'affichage de sa liste de liens : pendant que l'utilisateur lit la
+    liste, le flux se résout et remplit le cache « res: » — au clic, la
+    lecture démarre sans nouvelle résolution. Silencieux : un échec ici ne
+    change rien au clic, qui garde son chemin complet."""
+    if fastcache is None or not link:
+        return
+    try:
+        if fastcache.fresh('res:' + link, _RES_TTL):
+            return
+    except Exception:
+        pass
+    with _RES_LOCK:
+        if link in _RES_INFLIGHT:
+            return
+        _RES_INFLIGHT.add(link)
+
+    def _run():
+        try:
+            _resolve2_cached(name, link, quiet=True)
+        except Exception:
+            pass
+        finally:
+            with _RES_LOCK:
+                _RES_INFLIGHT.discard(link)
+
+    try:
+        t = threading.Thread(target=_run)
+        t.daemon = True
+        t.start()
+    except Exception:
+        with _RES_LOCK:
+            _RES_INFLIGHT.discard(link)
+
+
 def resolve2(name, url):
     """v3.7.8 — roue d'attente pendant la résolution (plus d'écran qui semble
     figé), message clair si aucun flux n'est extrait, lecture avec un titre
-    propre et le bon type MIME HLS (démarrage plus fiable du lecteur)."""
-    xbmc.executebuiltin('ActivateWindow(busydialognocancel)')
-    try:
-        stream_url = _resolve2_impl(name, url)
-    finally:
-        xbmc.executebuiltin('Dialog.Close(busydialognocancel)')
+    propre et le bon type MIME HLS (démarrage plus fiable du lecteur).
+    v3.7.22 — lecture immédiate du cache « res: » quand le préchauffage a
+    déjà résolu (ni roue d'attente, ni résolution) ; bascule automatique sur
+    le lien suivant quand le lien cliqué est mort (réglage, au plus 3
+    essais)."""
+    links, idx = _parse_play_payload(url)
+    auto_next = _auto_next() and len(links) > 1
+    stream_url = ''
+    if fastcache is not None:
+        pre = fastcache.fget('res:' + links[idx], _RES_TTL)
+        if pre:
+            stream_url = pre
+            log_info('RESOLVE-CACHE hit (instant): {0}'.format(links[idx][:70]))
+    if not stream_url:
+        xbmc.executebuiltin('ActivateWindow(busydialognocancel)')
+        try:
+            j = idx
+            tries = 0
+            while j < len(links):
+                tries += 1
+                if tries > 1:
+                    try:
+                        Dialog.notification(
+                            NAME,
+                            u"[COLOR skyblue]Lien {0} inaccessible — essai du lien {1}…[/COLOR]".format(j, j + 1),
+                            ICON, 3000, False)
+                    except Exception:
+                        pass
+                try:
+                    stream_url = _resolve2_cached(name, links[j])
+                except Exception as e:
+                    log_info('resolve link {0}/{1}: {2!r}'.format(j + 1, len(links), e))
+                    stream_url = ''
+                if stream_url:
+                    break
+                j += 1
+                if not auto_next or tries >= 3 or j >= len(links):
+                    break
+        finally:
+            xbmc.executebuiltin('Dialog.Close(busydialognocancel)')
     if not stream_url:
         raise Exception(u'Flux introuvable pour ce lien — réessayez ou choisissez un autre serveur.')
     liz = xbmcgui.ListItem(six.ensure_str(_plain(name), encoding='utf-8', errors='replace'))
