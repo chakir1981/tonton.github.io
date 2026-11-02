@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.11" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.12" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -16,6 +16,12 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
+      [B]v3.7.12[/B] 02/11/2026
+- NOUVELLE OPTION BÉTA « SOURCE SPORTONLINE » (désactivée par défaut) : dans Paramètres &gt; Réglages, active « BÉTA — Source SportOnline » pour faire apparaître un menu « BÉTA — Matchs SportOnline » en MAGENTA. C'est une source de test INDÉPENDANTE de DaddyLive (ni un/deux/trois, ni le guide habituel) : une grille texte du jour (aujourd'hui + demain) où chaque chaîne DÉCLARE sa langue (« HD4 GREEK &amp; FRENCH ») — la détection du français est donc plus fiable que jamais, et des matchs absents du guide habituel apparaissent (ex. Ligue 2 : Red Star vs Nancy, Reims vs Sochaux, en chaîne française).
+- PRÉSENTATION IDENTIQUE AU RESTE DE L'ADD-ON : heure en cyan, équipes en or, badge vert « ● EN DIRECT », langues en MAJUSCULES magenta (FR en premier, en gras), fiche de match complète, liste de liens numérotée avec chaîne en or et FR en vert, roue d'attente pendant la résolution. Le réglage « Uniquement les sources françaises » et « Langues dans le titre » s'appliquent aussi à la BÉTA.
+- HEURES CONVERTIES : la grille BÉTA est à l'heure anglaise (UK) ; les heures affichées sont converties en heure locale (Lorient vs Brest 19:45 UK = 20:45 en France).
+- BÉTA = TEST : la grille et les chaînes sont parfaitement accessibles, mais l'extraction finale du flux dépend de l'hébergeur lecteur (sous-domaine qui tourne) ; si un match BÉTA ne démarre pas, les ÉVÉNEMENTS EN DIRECT habituels restent là, inchangés. Retour d'expérience bienvenu.
+- Aucun autre changement : le réglage étant désactivé par défaut, l'add-on se comporte exactement comme en 3.7.11 tant que tu n'actives pas l'option. Toujours SANS aucun lien ajouté aux ÉVÉNEMENTS EN DIRECT.
       [B]v3.7.11[/B] 02/11/2026
 - TITRE DES MATCHS ÉPURÉ : la compétition (« France. Ligue 1 », « Italy. Serie A »…) disparaît de la ligne du match. Le titre affiche désormais uniquement l'heure, les équipes et les langues ; la compétition reste consultable dans la fiche du match (panneau d'informations du skin).
 - LANGUES EN MAJUSCULES DANS UNE COULEUR INÉDITE : les codes langue s'affichent en MAJUSCULES (FR, DE, IT, US…) en MAGENTA — couleur utilisée nulle part ailleurs dans l'add-on, impossible à confondre avec l'or (équipes), le vert (● EN DIRECT et FR de la liste des liens) ou le cyan (heure). Le FR est toujours placé en premier (en gras), les autres langues suivent dans l'ordre alphabétique. Exemples : « Lorient vs Brest FR », « Sassuolo vs Fiorentina DE IT », « PSG vs Nice FR US ».
