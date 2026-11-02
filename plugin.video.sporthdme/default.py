@@ -17,14 +17,12 @@ from resources.modules import control, client
 from resources.modules import site_embedlivesports
 from resources.modules import site_futbollibre
 from resources.modules import site_futbolmov
-from resources.modules import site_daddylive
-from resources.modules import site_365
 
-# v3.7.4 — cache disque persistant + exécution parallèle : les caches
+# v3.7.6 — cache disque persistant (portage de la 3.7.4) : les caches en
 # mémoire meurent à chaque navigation Kodi (nouveau processus) et chaque
-# clic re-téléchargeait tout (jusqu'à ~2 min d'attente). fastcache garde
-# grille, pages clubs footao, scan 365scores et pages joueur sur disque,
-# et le préchauffage se fait en parallèle (voir get_events).
+# visite du menu re-téléchargeait la grille des matchs. fastcache garde la
+# liste sur le disque du profil ; toute panne est silencieuse : l'add-on
+# fonctionne alors exactement comme la 2.0.5, juste sans cache.
 try:
     from resources.modules import fastcache as fastcache
 except Exception:
@@ -39,10 +37,6 @@ from dateutil import parser, tz
 # tvsport.guide is no longer a menu entry: it is the fallback schedule for
 # ÉVÉNEMENTS EN DIRECT and Événements en direct (see Live_fallback_url).
 EXTRA_SITES = [site_embedlivesports, site_futbollibre]
-# v3.6.3 — site_daddylive n'est plus une source de menu : son module fournit
-# fr_links_for (chaînes FR de la grille pour chaque match du guide),
-# l'enrichissement footao et la résolution _econfig/playlist-token des liens
-# watch.php que le menu Événements affiche désormais.
 SITES = {s.KEY: s for s in EXTRA_SITES}
 # futbol-libre.mov: one main-menu entry -> its three lists (fmov_menu)
 SITES.update((s.KEY, s) for s in site_futbolmov.SUBSITES)
@@ -105,18 +99,12 @@ def log_error(msg):
 
 
 def Main_menu():
-    # v3.6.0 — add-on recentré : seule la rubrique « ÉVÉNEMENTS EN DIRECT »
+    # v2.0.5 — add-on recentré : seule la rubrique « ÉVÉNEMENTS EN DIRECT »
     # (affichée en blanc) est conservée au menu. Les rubriques bleues
     # « Événements en direct » (doublon embedlivesports), « Football Libre »
     # et « Football Libre MOV » ne sont plus proposées (les modules et les
     # modes du routeur restent en place, simplement sans entrée de menu).
     addDir(u'[B][COLOR white]ÉVÉNEMENTS EN DIRECT[/COLOR][/B]', Live_url, 'events', ICON, FANART, True)
-    # v3.7.5 — les chaînes FR sur le réseau du guide (sans jeton DaddyLive) :
-    # annuaire local + miroirs vérifiés, en lecture directe un/deux/trois.
-    addDir(u'[B][COLOR gold]CHAÎNES FR (MIROIRS)[/COLOR][/B]', 'mirror', 'mirror_menu', ICON, FANART, True)
-    # v3.6.3 — retour au menu épuré 3.6.0 : les deux rubriques DaddyLive de
-    # la 3.6.1 sont retirées. Leurs liens FR arrivent désormais DANS
-    # « ÉVÉNEMENTS EN DIRECT » (get_events -> fr_links_for + footao + replis).
     # addDir('[B][COLOR gold]Channels 24/7[/COLOR][/B]', 'https://1.livesoccer.sx/program.php', 14, ICON, FANART, '')
     # addDir('[B][COLOR gold]Alternative VIEW [/COLOR][/B]', '', '', ICON, FANART, '')
     # addDir('[B][COLOR gold]Alternative LIVE EVENTS[/COLOR][/B]', Alt_url, 15, ICON, FANART, '')
@@ -147,13 +135,14 @@ def _matches_from_page(url):
 
 def get_events(url):  # 5
     matches = None
-    # v3.7.4 — liste de matchs gardée 2 min sur disque : re-rentrer dans le
-    # menu (retour arrière, rafraîchissement) est instantané.
+    # v3.7.6 — liste des matchs gardée 2 min sur disque (fastcache, portage
+    # de la 3.7.4) : revenir dans le menu (retour arrière, rafraîchissement,
+    # ré-ouverture de l'add-on) est instantané au lieu de re-télécharger la
+    # grille à chaque navigation. Échec du cache = téléchargement normal.
     ck_ev = 'ev:' + url
     if fastcache is not None:
         matches = fastcache.fget(ck_ev, 120)
-    fetched_from_cache = matches is not None
-    if not fetched_from_cache:
+    if not matches:
         if url != Live_fallback_url:
             try:
                 matches = _matches_from_page(url)
@@ -172,23 +161,6 @@ def get_events(url):  # 5
         control.infoDialog(u"[COLOR red]Aucun match programmé.[/COLOR]", NAME, ICON, 5000)
         return
 
-    # v3.7.4 — préchauffage PARALLÈLE des sources FR, une seule fois par
-    # menu : grille DaddyLive + toutes les pages clubs footao utiles (le
-    # gros du temps de chargement : ~60-100 s en séquentiel au premier
-    # affichage, en 4-8 s parallèle + cache disque 1 h) et scan 365scores
-    # (9 appels API en parallèle). Les appels fr_links_for de la boucle
-    # tombent ensuite sur des caches chauds, et les navigations suivantes
-    # ne re-téléchargent plus rien (fastcache).
-    fr_only = _french_only()
-    try:
-        if fastcache is not None and not fetched_from_cache:
-            jobs = [site_daddylive.warm_fr_caches]
-            if fr_only:
-                jobs.append(site_365.day_games)
-            fastcache.run_jobs(jobs, workers=2)
-    except Exception as e:
-        log_info('warmup failed: {0!r}'.format(e))
-
     # matches = re.findall('''null\,(\{"(?:matches|customNotFoundMessage).+?)\]\}\]n''', events, re.DOTALL)[0]
     # pattern = r'("matches"\s*\:\s*\[.+?])}]}]n"'
     # pattern = r'"matches"\s*\:\s*(\[.+?])}]]}]n'
@@ -203,9 +175,13 @@ def get_events(url):  # 5
         now_time_in_ms = (time.mktime(now.timetuple()) + now.microsecond / 1e6) * 1000
     else:
         now_time_in_ms = datetime.now().timestamp() * 1000
+    fr_only = _french_only()
     filtered_out = 0
     for match in matches:
         channels = match.get("channels", [])
+        if fr_only and not _channels_have_french(channels):
+            filtered_out += 1
+            continue
         # links = match['additionalLinks']
         # links.extend(match['channels'])
         icon = match.get('team1Img', ICON)
@@ -232,81 +208,6 @@ def get_events(url):  # 5
                 compare = int('999999999999')
                 ftime = '-'
 
-        # v3.6.3 — liens FR de la grille DaddyLive pour CE match (chaînes
-        # réellement diffusées, enrichies footao, doublées d'un repli).
-        # Panne silencieuse -> [] : le menu reste exactement celui de la 3.6.0.
-        ex_links = []    # v3.7.5 — liens 365scores (définis plus bas si fr_only)
-        if team1 and team2 and compare != int('999999999999'):
-            dl_links = site_daddylive.fr_links_for(team1, team2, compare)
-        else:
-            dl_links = []
-        for dl_name, dl_url in dl_links:
-            label = dl_name if u'(footao)' in dl_name else u'%s [DaddyLive]' % dl_name
-            channels.append({'channelName': label, 'language': 'fr',
-                             'links': [dl_url], 'dl': 1})
-            # v3.6.2 — double lien « (repli) » : résolution playlist-token
-            channels.append({'channelName': u'%s (repli)' % label, 'language': 'fr',
-                             'links': [dl_url], 'dl': 1, 'f': 1})
-
-        # v3.7.2 — enrichissement 365scores : matchs diffusés sur une chaîne
-        # française VÉRIFIÉE par 365scores (api web publique, pays France)
-        # mais absents de la grille DaddyLive (ex. MLS sur Apple TV). Liste
-        # blanche stricte : une chaîne inconnue est ignorée, jamais un lien
-        # étranger injecté. Actif seulement en mode « sources françaises ».
-        if fr_only and team1 and team2 and compare != int('999999999999'):
-            try:
-                ex_links = site_365.fr_links_for(team1, team2, compare)
-            except Exception:
-                ex_links = []
-            have_ids = set()
-            for _n, u_ in dl_links:
-                mi_ = re.search(r'id=(\d+)', u_ or '')
-                if mi_:
-                    have_ids.add(mi_.group(1))
-            for ex_name, ex_url in ex_links:
-                mi_ = re.search(r'id=(\d+)', ex_url or '')
-                if mi_ and mi_.group(1) in have_ids:
-                    continue  # chaîne déjà présente via la grille/footao
-                label = u'%s [365]' % ex_name
-                channels.append({'channelName': label, 'language': 'fr',
-                                 'links': [ex_url], 'dl': 1, 'v365': 1})
-                channels.append({'channelName': u'%s (repli)' % label,
-                                 'language': 'fr', 'links': [ex_url],
-                                 'dl': 1, 'v365': 1, 'f': 1})
-                if mi_:
-                    have_ids.add(mi_.group(1))
-
-        # v3.7.5 — MIROIRS FR sur le réseau du guide (vertex/nexa/kora) :
-        # chaque chaîne FR connue (Canal+ Foot / France / Sport) existe AUSSI
-        # sur la famille de lecteurs du guide, SANS le jeton DaddyLive. Ces
-        # liens empruntent resolve2 — le chemin des liens « un / deux /
-        # trois » du guide, celui qui fonctionne chez l'utilisateur — et
-        # qualifient un match en mode strict (trio réel de 3 liens).
-        fr_names = [n for n, _u in dl_links] + [n for n, _u in ex_links]
-        try:
-            m_urls = site_daddylive.mirror_links_for(fr_names)
-        except Exception:
-            m_urls = []
-        if m_urls:
-            have_mk = set()
-            for c in channels:
-                if c.get('dl') or c.get('v365'):
-                    continue   # DaddyLive reste affiché : le miroir s'AJOUTE
-                have_mk.add(site_daddylive.mirror_key(c.get('channelName')))
-            for m_name, m_links in m_urls:
-                if site_daddylive.mirror_key(m_name) in have_mk:
-                    continue   # la chaîne est déjà là via le guide
-                channels.append({'channelName': u'%s [Miroir]' % m_name,
-                                 'language': 'FR', 'links': list(m_links)})
-
-        # v3.7.0 — règle stricte : le match doit être diffusé sur une vraie
-        # chaîne française du guide (avec son trio de liens un/deux/trois).
-        # Les entrées DaddyLive injectées ne qualifient plus un match.
-        # v3.7.5 — les trios [Miroir] (réseau du guide) qualifient aussi.
-        if fr_only and not _channels_have_french_trio(channels):
-            filtered_out += 1
-            continue
-
         duration_in_ms = match['duration'] * 60 * 1000
 
         is_live = False
@@ -321,7 +222,7 @@ def get_events(url):  # 5
         # streams = str(quote(base64.b64encode(six.ensure_binary(str(streams)))))
     if not event_list:
         if fastcache is not None:
-            fastcache.flush()          # persister les caches réchauffés
+            fastcache.flush()          # persister la liste mise en cache
         if filtered_out:
             control.infoDialog(u"[COLOR gold]Aucune source française parmi les matchs du moment.[/COLOR]", NAME, ICON, 6000)
         return
@@ -333,7 +234,7 @@ def get_events(url):  # 5
         addDir(name, streams, 'get_streams', icon, FANART, isFolder=True)
 
     if fastcache is not None:
-        fastcache.flush()              # persister les caches réchauffés
+        fastcache.flush()              # persister la liste mise en cache
     xbmcplugin.setContent(_handle, 'videos')
     xbmcplugin.endOfDirectory(_handle)
 
@@ -366,7 +267,7 @@ NON_FR_LANGS = ('pl', 'us', 'gb', 'uk', 'de', 'es', 'it', 'pt', 'nl', 'dk', 'no'
 FRENCH_NAME_RE = re.compile(
     r'\bfr\b|\[fr\]|\(fr\)|french|fran[cç]ais|\bfrance\b|canal\+\s*foot|rmc\s*sport|'
     r'quipe|tf1\b|\bm6\b|\bw9\b|\btmc\b|ligue1'
-    # v3.6.1 — chaînes FR DaddyLive sans suffixe « France » ni champ langue :
+    # v3.6.1 — chaînes FR sans suffixe « France » ni champ langue :
     r'|bein sports (max )?\d+ france|eurosport \d+ france'
     # v3.7.1 — « canal+ » seul ne suffit plus : les Canal+ Sport 1-5 et
     # Canal+ 1 numérotés sont des chaînes ÉTRANGÈRES (Pologne…) ; la France
@@ -374,7 +275,7 @@ FRENCH_NAME_RE = re.compile(
     # tout « canal+ » suivi d'un numéro nu ou de « sport 1-5 » (360 reste FR).
     r'|canal\+(?! ?sport ?[1-9]\b)(?! ?[1-9]\b)'
     r'|tennis\+|golf\+|\bfoot\+|automoto|motogp|infosport'
-    # v3.6.2 — chaînes FR ajoutées par l'enrichissement footao :
+    # v3.6.2 — chaînes FR du guide sans marque explicite (6ter, Arte…) :
     r'|6ter|\barte\b|\bc8\b|\blci\b|\bbfm\b')
 
 # v3.6.1 — les variantes ÉTRANGÈRES des mêmes groupes (Canal+ Sport SK/CZ/
@@ -449,35 +350,6 @@ def _channels_have_french(channels):
     return not identified
 
 
-def _channels_have_french_trio(channels):
-    """v3.7.0 — mode « sources françaises » strict : le match doit être
-    réellement diffusé sur une chaîne française DU GUIDE, et cette chaîne
-    doit fournir son trio de liens miroir (vertex.st / nexa.st / kora.st,
-    affichés « un / deux / trois » = 1 / 2 / 3). Un match sans chaîne FR
-    du guide mais seulement doublé d'une entrée DaddyLive (principale +
-    repli, ex. NFL Sunday Ticket sur un match NFL) n'afficherait que 2
-    liens : il reste masqué quand le réglage est actif.
-    v3.7.2 — exception contrôlée : une chaîne marquée v365 est une
-    diffusion française VÉRIFIÉE par 365scores (api publique, pays France,
-    liste blanche stricte). Le match est diffusé en France pour de vrai :
-    principal + repli suffisent, pas besoin du trio de miroirs."""
-    for ch in channels:
-        if not isinstance(ch, dict):
-            continue
-        links = ch.get('links') or []
-        name = ch.get('channelName') or ch.get('name')
-        if ch.get('v365'):
-            # v3.7.2 — chaîne FR vérifiée 365scores : diffusion FR attestée
-            if links and _is_french_source(name, ch.get('language')):
-                return True
-            continue
-        if ch.get('dl'):
-            continue  # les entrées DaddyLive injectées ne qualifient pas
-        if len(links) >= 3 and _is_french_source(name, ch.get('language')):
-            return True
-    return False
-
-
 def _servers_have_french(servers):
     """True si au moins un serveur (sites annexes) est en français."""
     for srv in servers or []:
@@ -514,8 +386,7 @@ def get_stream(name, url):  # 4
 
     import ast
     fr_only = _french_only()
-    sstreams = []   # liens du guide -> play_stream (resolve2)
-    dl_dirs = []    # v3.6.3 — liens de la grille DaddyLive -> site_play
+    sstreams = []
     for event in ast.literal_eval(data):
         if not isinstance(event, dict):  # TNT Sports 1
             datos = get_links_for_channel(event) or []
@@ -536,14 +407,9 @@ def get_stream(name, url):  # 4
             chan = six.ensure_text(event.get('name', ''), encoding='utf-8', errors='replace')
             chan = u'[COLOR gold]{}[/COLOR] - {}'.format(chan, lang)
             for url_ in link:
-                # v3.6.3 — lien watch.php de la grille DaddyLive : résolution
-                # par le module DaddyLive (_econfig ; playlist-token si repli)
-                if event.get('dl') and 'watch.php?id=' in str(url_):
-                    dl_dirs.append((str(url_), chan, bool(event.get('f'))))
-                else:
-                    sstreams.append((url_, chan))
+                sstreams.append((url_, chan))
 
-    if not sstreams and not dl_dirs:
+    if len(sstreams) < 1:
         if fr_only:
             control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]\n"
                                u"[COLOR lime]Réglage : « Uniquement les sources françaises » dans les paramètres.[/COLOR]",
@@ -552,29 +418,22 @@ def get_stream(name, url):  # 4
             control.infoDialog(u"[COLOR gold]Aucun lien disponible pour le moment.\n "
                                u"[COLOR lime]Réessayez plus tard ![/COLOR]", NAME, ICON, 5000)
         return
-    if len(sstreams) == 1 and not dl_dirs:
-        # un seul lien du guide et aucun lien DaddyLive : lecture directe
-        # (comportement 3.6.0 conservé)
-        link = sstreams[0][0]
-        resolve2(name, link)
-        return
-    for i in sstreams:
-        title, link = i[1], i[0]
-        if not 'vecdn' in link:
-            # if not 'https://bedsport' in link and not 'vecdn' in link:
-            if not str(link) == str(title):
-                title += ' | {}'.format(_link_label(link))
-        info = {'title': title, 'sorttitle': '', 'plot': name}
-        addDir(title, link, 'play_stream', ICON, name, isFolder=False, infoLabels=info)
-    # v3.6.3 — les liens de la grille DaddyLive (grille + footao) passent par
-    # site_play : « (repli) » force la résolution playlist-token (f=1).
-    for url_, chan, is_f in dl_dirs:
-        info = {'title': chan, 'sorttitle': '', 'plot': name}
-        addDir(chan, json.dumps({'k': 'dlhd', 'u': url_, 't': name, 'p': '',
-                                 'f': '1' if is_f else ''}),
-               'site_play', ICON, name, isFolder=False, infoLabels=info)
-    xbmcplugin.setContent(_handle, 'videos')
-    xbmcplugin.endOfDirectory(_handle)
+    else:
+        if len(sstreams) > 1:
+            for i in sstreams:
+                title, link = i[1], i[0]
+                if not 'vecdn' in link:
+                    # if not 'https://bedsport' in link and not 'vecdn' in link:
+                    if not str(link) == str(title):
+                        title += ' | {}'.format(_link_label(link))
+                info = {'title': title, 'sorttitle': '', 'plot': name}
+                addDir(title, link, 'play_stream', ICON, name, isFolder=False, infoLabels=info)
+            xbmcplugin.setContent(_handle, 'videos')
+            xbmcplugin.endOfDirectory(_handle)
+
+        else:
+            link = sstreams[0][0]
+            resolve2(name, link)
 
 
 def xbmc_curl_encode(url, headers):
@@ -1041,93 +900,6 @@ def get_links_for_channel(channel_name):
     return None
 
 
-def ensure_channel_data(max_age_h=24.0):
-    """v3.7.5 — (re)télécharge l'annuaire de canaux si absent ou périmé.
-
-    L'appel dans le routeur avait été commenté : channels.json n'existait
-    donc plus sur les installations récentes, et plus aucune chaîne de
-    l'annuaire n'était disponible. Échec réseau -> silencieux : les miroirs
-    intégrés (Canal+ Foot/France/Sport) restent disponibles sans lui."""
-    try:
-        fresh = False
-        try:
-            import os
-            fresh = (time.time() - os.path.getmtime(JSON_FILE_PATH)) < max_age_h * 3600.0
-        except Exception:
-            fresh = False
-        if not fresh:
-            fetch_and_store_channel_data()
-    except Exception as e:
-        log_info('ensure_channel_data: {0!r}'.format(e))
-
-
-def fr_directory_channels():
-    """[(nom, [liens])] des chaînes FR de l'annuaire local channels.json."""
-    out = []
-    try:
-        for ch in load_data_from_json():
-            nm = six.ensure_text(ch.get('channelName') or u'',
-                                 encoding='utf-8', errors='replace')
-            links = [l for l in (ch.get('links') or []) if l]
-            if nm and links and site_daddylive.is_fr_channel(nm):
-                out.append((nm, links))
-    except Exception as e:
-        log_info('fr_directory_channels: {0!r}'.format(e))
-    return out
-
-
-def mirror_menu():
-    """v3.7.5 — rubrique « CHAÎNES FR (MIROIRS) » : chaînes françaises
-    jouables sur le réseau du guide (resolve2, sans jeton DaddyLive).
-
-    1) l'annuaire local channels.json (beIN France, RMC, Ligue1+…) quand il
-       est disponible, 2) les miroirs vérifiés intégrés + configuration
-       distante (Canal+ Foot/France/Sport)."""
-    ensure_channel_data()
-    entries, seen = [], set()
-    for nm, links in fr_directory_channels():
-        k = site_daddylive.mirror_key(nm) or nm.lower()
-        if k in seen:
-            continue
-        seen.add(k)
-        entries.append((nm, links))
-    for k, (disp, cid) in sorted(site_daddylive.mirror_chans().items()):
-        if k in seen:
-            continue
-        seen.add(k)
-        urls = ['https://{0}/ch?id={1}'.format(h, cid)
-                for h in site_daddylive.MIRROR_HOSTS]
-        entries.append((disp, urls))
-    if not entries:
-        control.infoDialog(u"[COLOR gold]Aucune chaîne FR disponible pour le moment.[/COLOR]",
-                           NAME, ICON, 5000)
-        return
-    for nm, links in entries:
-        data = str(quote(base64.b64encode(six.ensure_binary(str(links)))))
-        addDir(u'[COLOR gold]%s[/COLOR]' % nm, data, 'mirror_ch', ICON, nm, isFolder=True)
-    xbmcplugin.setContent(_handle, 'videos')
-    xbmcplugin.endOfDirectory(_handle)
-
-
-def mirror_play(name, data):
-    """v3.7.5 — un canal miroir -> ses liens (un / deux / trois) en lecture
-    directe via play_stream (resolve2), comme le trio du guide."""
-    try:
-        import ast
-        links = ast.literal_eval(six.ensure_text(base64.b64decode(unquote(data))))
-    except Exception as e:
-        log_error('mirror_play: {0!r}'.format(e))
-        return
-    if not isinstance(links, (list, tuple)):
-        links = [links]
-    for u_ in links:
-        info = {'title': name, 'sorttitle': '', 'plot': name}
-        addDir(u'%s | %s' % (name, _link_label(u_)), u_, 'play_stream', ICON, name,
-               isFolder=False, infoLabels=info)
-    xbmcplugin.setContent(_handle, 'videos')
-    xbmcplugin.endOfDirectory(_handle)
-
-
 ###################################################
 ###################################################
 ###################################################
@@ -1270,6 +1042,8 @@ def site_events_menu(key):
             log_info('emls fallback failed: {0!r}'.format(e))
         key = site_futbollibre.KEY
     if not events:
+        # v3.7.6 — message clair au lieu d'une page vide quand le site ne
+        # répond pas ou n'a aucun événement.
         control.infoDialog(u"[COLOR red]Aucun événement disponible pour le moment.[/COLOR]",
                            NAME, ICON, 5000)
         xbmcplugin.endOfDirectory(_handle)
@@ -1351,18 +1125,6 @@ def site_streams_menu(payload):
     d = json.loads(payload)
     poster = d.get('p') or ICON
     title = six.ensure_text(d.get('t', ''), encoding='utf-8', errors='replace')
-    is_match = bool(d.get('t')) and u' vs ' in six.ensure_text(
-        d.get('t', ''), encoding='utf-8', errors='replace')
-    if d.get('k') == site_daddylive.KEY and is_match:
-        # v3.6.2 — enrichissement footao : quand la grille DaddyLive ne
-        # liste qu'une chaîne FR, footao en donne souvent une seconde
-        # (diffuseur1/diffuseur2). Échec silencieux : on garde la grille.
-        try:
-            d['s'] = site_daddylive.enrich_servers(
-                six.ensure_text(d.get('t', ''), encoding='utf-8',
-                                errors='replace'), d['s'])
-        except Exception as e:
-            log_info('footao enrich failed: {0!r}'.format(e))
     fr_only = _french_only()
     shown = 0
     for sname, surl in d['s']:
@@ -1376,15 +1138,6 @@ def site_streams_menu(payload):
                json.dumps({'k': d['k'], 'u': surl, 't': title, 'p': d.get('p', '')}),
                'site_play', poster, title, isFolder=False, infoLabels=info)
         shown += 1
-        # v3.6.2 — second lien « (repli) » pour chaque chaîne DaddyLive d'un
-        # match : résolution directe par playlist-token (saute _econfig).
-        # Si l'un des deux résolveurs casse, l'autre reste jouable.
-        if d.get('k') == site_daddylive.KEY and is_match:
-            addDir(u'[B]{0} (repli)[/B]'.format(sname),
-                   json.dumps({'k': d['k'], 'u': surl, 't': title,
-                               'p': d.get('p', ''), 'f': '1'}),
-                   'site_play', poster, title, isFolder=False, infoLabels=info)
-            shown += 1
     if not shown:
         control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]", NAME, ICON, 6000)
     xbmcplugin.setContent(_handle, 'videos')
@@ -1393,18 +1146,11 @@ def site_streams_menu(payload):
 
 def site_play(payload):
     d = json.loads(payload)
+    site = SITES[d['k']]
     title = d.get('t') or NAME
     poster = d.get('p') or ICON
     Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
-    if d['k'] == site_daddylive.KEY:
-        # v3.6.3 — liens watch.php de la grille (menu Événements) : le module
-        # DaddyLive résout (_econfig ; playlist-token si « (repli) » f=1)
-        result = site_daddylive.resolve(d['u'], prefer_fallback=bool(d.get('f')))
-        site_ua = site_daddylive.UA
-    else:
-        site = SITES[d['k']]
-        result = site.resolve(d['u'])
-        site_ua = site.UA
+    result = site.resolve(d['u'])
     if not result:
         raise Exception('could not resolve stream for ' + d['u'])
     # resolve() normally returns just the m3u8 string; sites that chain
@@ -1414,7 +1160,7 @@ def site_play(payload):
     # for Referer/Origin.
     flink, referer_url = result if isinstance(result, tuple) else (result, d['u'])
     origin = '{uri.scheme}://{uri.netloc}'.format(uri=urlparse(referer_url))
-    stream_headers = {'Referer': origin + '/', 'Origin': origin, 'User-Agent': site_ua}
+    stream_headers = {'Referer': origin + '/', 'Origin': origin, 'User-Agent': site.UA}
     # installed inputstream.ffmpegdirect (21.3.8) does not whitelist a
     # stream_headers listitem property -- its addon.xml listitemprops=
     # "...default_url|is_realtime_stream|..." has no headers entry, so
@@ -1463,12 +1209,6 @@ def site_play(payload):
         liz.setProperty('inputstream.ffmpegdirect.default_url', stream_url)
     liz.setPath(stream_url)
     xbmc.Player().play(stream_url, liz, False)
-    # v3.7.3 — le manifest DaddyLive est servi par le mini-serveur local
-    # 127.0.0.1 (jeton renouvelé à chaque rechargement de playlist : l'edge
-    # expire les jetons après ~2 min). Ce serveur vit dans CE processus
-    # d'addon : il doit rester en vie tant que la lecture tourne.
-    if stream_url.startswith('http://127.0.0.1'):
-        site_daddylive.proxy_keepalive()
 
 
 def router(paramstring):
@@ -1489,6 +1229,17 @@ def router(paramstring):
             Open_settings()
         elif params['mode'] == 'clear':
             control.deleteFile(LAST_UPDATE_FILE)
+            # v3.7.6 — le cache disque fastcache fait partie des données :
+            # « Vider les données de l'add-on » le supprime aussi.
+            try:
+                import os as _os
+                _fc = _os.path.join(ADDON_DATA, 'fastcache.json')
+                if _os.path.exists(_fc):
+                    _os.remove(_fc)
+                if fastcache is not None:
+                    fastcache._items = None   # sera rechargé au prochain accès
+            except Exception:
+                pass
             control.infoDialog(u"[COLOR gold]Fichiers effacés[/COLOR]", NAME,
                                ICON, 5000)
         elif params['mode'] == 'version':
@@ -1503,10 +1254,6 @@ def router(paramstring):
             site_streams_menu(params['url'])
         elif params['mode'] == 'site_play':
             site_play(params['url'])
-        elif params['mode'] == 'mirror_menu':
-            mirror_menu()
-        elif params['mode'] == 'mirror_ch':
-            mirror_play(params['description'], params['url'])
     else:
         Main_menu()
 

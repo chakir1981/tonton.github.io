@@ -62,7 +62,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.5" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.6" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -79,57 +79,12 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
-      [B]v3.7.5[/B] 02/11/2026
-- NOUVELLES SOURCES FRANÇAISES qui passent par un AUTRE réseau : les liens français ajoutés ([DaddyLive]/(footao)/[365]) dépendaient tous d'une même chaîne de résolution (jeton DaddyLive) — quand elle est refusée chez vous, PLUS AUCUN lien FR ne marche. Or les chaînes Canal+ Foot / Canal+ / Canal+ Sport existent aussi sur la famille de lecteurs du guide (celle des liens un/deux/trois, qui fonctionne déjà chez vous). Chaque chaîne FR connue d'un match est donc désormais doublée d'un trio « [Miroir] » sur ce réseau : Canal+ Foot, Canal+ et Canal+ Sport, résolus par le même chemin que les liens un/deux/trois — sans jeton, sans proxy.
-- NOUVELLE RUBRIQUE « CHAÎNES FR (MIROIRS) » au menu : ouvrez directement une chaîne française (beIN Sports France, RMC Sport, Ligue1+, L'Équipe… dès que l'annuaire répond, + les miroirs Canal+ toujours disponibles) et lisez-la en direct, avec ses liens un/deux/trois.
-- Les matchs diffusés sur Canal+ Foot / Canal+ / Canal+ Sport sont désormais VISIBLES même en mode « Uniquement les sources françaises » quand le guide ne les listait pas (le trio miroir est un vrai trio de 3 liens).
-- Table des miroirs extensible sans nouvelle version : l'add-on lit « fr_mirrors » dans la configuration distante (cache 6 h) — un nouveau miroir FR peut être ajouté côté serveur en quelques heures.
-- L'annuaire de canaux (channels.json) est de nouveau téléchargé automatiquement (24 h de validité) : il alimente la rubrique CHAÎNES FR (MIROIRS). Échec réseau = silencieux, les miroirs intégrés restent disponibles.
-      [B]v3.7.4[/B] 02/11/2026
-- FINI LES LONGS TEMPS DE CHARGEMENT : le cache de l'add-on vivait seulement en memoire et mourait a chaque navigation (Kodi relance le processus a chaque clic) — la grille DaddyLive, les pages clubs footao, le scan 365scores et les pages joueur etaient donc re-telecharges en boucle (jusqu'a 1-2 minutes d'attente). Tout est maintenant garde sur le disque du profil (grille 10 min, clubs footao 1 h, 365scores 30 min, pages joueur 20 min) : re-rentrer dans le menu, revenir en arriere ou relancer un lien est quasi instantane.
-- Les telechargements se font desormais EN PARALLELE : grille + clubs footao + scan 365scores en meme temps (9 appels API en parallele), page watch + page stream du joueur en meme temps. Premier affichage divise par 3 a 5 ; affichages suivants quasi instantanes.
-- La grille DaddyLive n'est plus telechargee deux fois de suite (le domaine qui marche est retenu 30 min, le HTML sert a la fois a la verification et a la grille) ; les connexions sont reutilisees (keep-alive) et les delais d'attente reduits (20 s -> 12 s) pour ne plus rester bloque sur un serveur lent.
-- Si DaddyLive est momentanement injoignable, le menu repart de la derniere grille connue (jusqu'a 3 h) au lieu d'etre vide.
-- [B]v3.7.3[/B] 02/11/2026
-
-- CORRIGÉ le bug « erreur » sur les liens français ajoutés : [DaddyLive], (footao), [365] et leurs replis échouaient à la lecture alors que les liens un/deux/trois du guide marchaient (ex. Denver vs Kansas City). Cause : le serveur de flux de DaddyLive exige désormais l'en-tête « Origin » EN PLUS du « Referer » pour délivrer son jeton de lecture — sans lui, l'add-on tombait sur une URL refusée (« token required »).
-- FINI LES COUPURES À 2 MINUTES : le jeton de DaddyLive expire après ~2 minutes (et est lié à votre adresse IP). L'add-on embarque maintenant un mini-serveur local qui redemande un jeton neuf à CHAQUE rechargement du flux, exactement comme le lecteur du site web — la lecture continue tout un match.
-- Les segments vidéo restent servis directement par leur CDN (aucune perte de débit, rien ne transite par Internet en plus). Les sous-playlists et clés éventuelles sont gérées automatiquement.
-- En cas d'indisponibilité momentanée, le message est clair (« jeton de flux refusé — réessaie dans quelques secondes ») au lieu d'une lecture qui échoue sans explication.
-      [B]v3.7.2[/B] 02/11/2026
-- Encore plus de matchs français : nouvel enrichissement par 365scores (api web publique, pays = France). Les matchs diffusés sur une vraie chaîne française mais absents de la grille DaddyLive arrivent maintenant dans « ÉVÉNEMENTS EN DIRECT » (ex. MLS sur Apple TV, NBA en saison…) — marqués « [365] », chacun doublé d'un lien « (repli) ».
-- Vérification stricte : seule une liste blanche de chaînes françaises est acceptée (Apple TV, beIN 1/2/3 + MAX, Canal+/Foot/Sport/360/F1/MotoGP, DAZN Ligue 1, RMC 1/2, Eurosport 1/2, France 2-5, TF1, M6, W9, TMC, L'Équipe, Sport en France, Automoto, 6ter, Arte, C8). Les chaînes étrangères de 365scores (Disney+, ESPN, SporTV, Antel…) sont ignorées : aucun lien non français ne peut arriver.
-- Anti faux positifs : un match n'est retenu que si les DEUX équipes correspondent ET que l'horaire concorde (± 3 h 30) — un même club jouant deux fois dans la journée ne peut pas être confondu.
-- La chaîne Apple TV est retrouvée dynamiquement dans la grille du jour (son identifiant change chaque jour, jamais codé en dur). Cache 30 min, repli silencieux si l'api est en panne : le menu reste identique.
-- La règle stricte 3.7.0 est conservée : un match 365scores est une diffusion française VÉRIFIÉE (api pays France), donc principal + repli suffisent à l'afficher ; tout le reste exige toujours le trio un/deux/trois.
-      [B]v3.7.1[/B] 02/11/2026
-- Fini les liens polonais dans le mode « Uniquement les sources françaises » : les chaînes Canal+ Sport 3, Canal+ Sport 5, Canal+ 1, etc. numérotées sont des chaînes ÉTRANGÈRES (Ekstraklasa polonaise…) — la France n'a que Canal+ Sport et Canal+ Sport 360. Elles sont maintenant rejetées, même si leur nom contient « Canal+ ».
-- Double protection : 1) un code langue explicite du guide (PL, US, GB, DE…) rejette la chaîne avant tout test de nom ; 2) le filtre par nom n'accepte plus un « Canal+ » suivi d'un numéro (sauf Canal+ Sport 360 / Afrique).
-- Corrigé aussi côté DaddyLive : la grille ne peut plus injecter une Canal+ numérotée polonaise comme lien français.
-      [B]v3.7.0[/B] 02/11/2026
-- Réglage « Uniquement les sources françaises » devenu STRICT : seuls les matchs réellement diffusés sur une chaîne française du guide restent affichés, avec leurs 3 liens miroirs (un / deux / trois). Fini les faux positifs : un match sans chaîne FR du guide mais simplement doublé d'une entrée DaddyLive (ex. NFL Sunday Ticket sur Denver vs Kansas City) qui n'affichait que 2 liens est désormais masqué quand le réglage est actif.
-- Configuration distante : l'add-on lit un fichier de secours (sporthdme_remote.json) publié sur le site de l'add-on. Si les trois domaines DaddyLive intégrés tombent tous, les miroirs listés dans ce fichier sont essayés automatiquement — réparation possible en éditant un JSON, sans nouvelle version (cache 6 h, panneau réseau silencieux).
-- Le réglage désactivé (mode « toutes sources ») reste inchangé : liste complète du guide + liens DaddyLive/footao.
-      [B]v3.6.3[/B] 02/11/2026
-- Retour au menu épuré de la 3.6.0 : une seule rubrique « ÉVÉNEMENTS EN DIRECT » — les deux rubriques DaddyLive dédiées de la 3.6.1 sont supprimées.
-- Les liens français arrivent DANS « ÉVÉNEMENTS EN DIRECT » : chaque match du guide gagne les chaînes FR de la grille DaddyLive qui le diffusent réellement (marquées « [DaddyLive] »), enrichies par footao.tv quand un 2e diffuseur existe (marqué « (footao) »), chacune doublée d'un lien « (repli) » qui force la résolution playlist-token si la voie _econfig tombe.
-- Les matchs sans chaîne FR dans le guide mais diffusés sur une chaîne française de la grille DaddyLive apparaissent désormais aussi.
-- Si DaddyLive/footao sont injoignables, le menu se comporte exactement comme la 3.6.0 (aucune régression).
-      [B]v3.6.2[/B] 02/11/2026
-- Chaque match gagne des liens : enrichissement footao.tv — quand la grille DaddyLive ne liste qu'une chaîne française, le guide footao (chaînes réellement diffusées en France) ajoute le deuxième diffuseur (Canal+ Foot, Canal+, beIN, RMC, Ligue1+…), marqué « (footao) ». 150 clubs couverts (Ligue 1/2, PL, Liga, Serie A, Bundesliga, C1/C2, sélections), cache 1 h, panne silencieuse.
-- Deux liens par chaîne : chaque chaîne d'un match propose « Chaîne » (résolution _econfig) et « Chaîne (repli) » (résolution playlist-token) — si un résolveur casse, l'autre reste jouable.
-- Filtrage français élargi aux chaînes 6ter, Arte, C8, LCI, BFM (ajoutées par footao).
-      [B]v3.6.1[/B] 02/11/2026
-- Nouvelle rubrique « Matchs du jour (FR) » : le planning DaddyLive du jour (thedaddy.pk) filtré sur les vraies chaînes françaises — beIN Sports 1/2/3 + MAX France, Canal+, Canal+ Sport/Foot/F1/MotoGP, RMC Sport, Ligue1+ (DAZN), Eurosport France, L'Équipe, Sport en France… soit ~45 matchs FR par jour, horaires convertis, statut en direct, chaînes miroirs en secours.
-- Nouvelle rubrique « Chaînes FR (24/7) » : ~40 chaînes françaises disponibles en continu (toutes les beIN/Canal+/RMC/DAZN Ligue1+/Eurosport France + TF1, M6, France 2-5, TMC, C8 pour les grands événements).
-- Résolution 2026 : page stream → iframe joueur → décodeur _econfig (base64, 4 blocs, réordonnancement [2,0,3,1]) avec repli playlist-token (SRC/CHANNEL/EDGE) et dernier recours m3u8 direct.
-- Basculement automatique de domaine (thedaddy.pk → dlive.sx → dlhd.pk) et filtrage « sources françaises » élargi (Tennis+, Golf+, foot+, Automoto, MotoGP, Infosport+).
-- [B]v3.6.0[/B] 02/11/2026
-- Add-on recentré sur l'essentiel : le menu ne garde que la rubrique « ÉVÉNEMENTS EN DIRECT » (affichée en blanc). Les rubriques bleues « Événements en direct » (doublon), « Football Libre » et « Football Libre MOV » sont retirées du menu.
-- v2.0.4 : interface entièrement traduite en français : « Événements en direct », « Football Libre », « Football Libre MOV », sous-menus « Chaînes latino », « Sports USA », « Football en direct », descriptions et repli « Serveur ».
-- v2.0.3 : l'add-on est publié au nom de chakir1981.
-- v2.0.2 : correction du cache d'images de Kodi — les fichiers d'images sont renommés (icon2.png / fanart2.jpg) pour que le nouveau logo et le nouveau fanart s'affichent partout.
-- v2.0.1 : retour au menu classique (Événements en direct + sites annexes) ; réglage « Uniquement les sources françaises » dans les paramètres (activé par défaut) ; serveurs affichés « un », « deux », « trois ».
+      [B]v3.7.6[/B] 02/11/2026
+- RETOUR À LA BASE 2.0.5 : chaque match n'affiche plus que ses liens d'origine du guide (« un / deux / trois »). TOUS les liens ajoutés sont supprimés : [DaddyLive], (footao), [365], les doublons « (repli) », les [Miroir] et la rubrique « CHAÎNES FR (MIROIRS) » — aucun lien de secours nulle part.
+- Les modules DaddyLive / footao / 365scores (et leur mini-serveur local) ne sont plus embarqués : l'add-on redevient exactement celui de la 2.0.5, en plus léger.
+- CONSERVÉ — RAPIDITÉ (portage de la 3.7.4) : la liste des matchs est gardée sur le disque du profil (cache persistant fastcache, 2 min) : revenir dans le menu, rafraîchir ou rouvrir l'add-on est instantané au lieu de re-télécharger la grille à chaque navigation. En cas d'échec du cache, téléchargement normal : aucune régression possible.
+- CONSERVÉ — FILTRAGE FR (portage de la 3.7.1) : en mode « Uniquement les sources françaises », les chaînes étrangères à marque française (Canal+ Sport 3/5 polonaises, TSN, NFL Sunday Ticket…) sont rejetées via leur code pays avant tout test de nom ; Canal+ Sport 360 reste acceptée.
+- CONSERVÉ — ROBUSTESSE : message clair quand aucun événement n'est disponible (fin des pages vides), titres de chaînes toujours lisibles (encodage), délai d'attente du serveur de secours du guide réduit (20 s -> 12 s), et « Vider les données de l'add-on » efface aussi le cache disque.
     </news>
 
     <assets>
@@ -138,4 +93,5 @@
     </assets>
   </extension>
 </addon>
+
 </addons>
