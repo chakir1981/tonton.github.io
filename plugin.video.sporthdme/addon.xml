@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.9" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.10" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -16,6 +16,10 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
+      [B]v3.7.10[/B] 02/11/2026
+- LANGUES DANS LE TITRE DES MATCHS : le compteur de liens (souvent faux — il comptait les chaînes alors que l'ouverture du match liste les miroirs un/deux/trois) est remplacé par les LANGUES réelles du match : « Lorient vs Brest fr », « Sassuolo vs Fiorentina de it », « PSG vs Nice fr us »… Le fr est toujours placé en premier (en vert), les autres langues suivent en gris. Ce qui est écrit dans le titre correspond exactement aux liens listés à l'ouverture du match.
+- Nouveau réglage « Langues dans le titre des matchs » (remplace « Compteur de liens ») dans Paramètres > Affichage ; désactivable.
+- Aucun autre changement : mêmes matchs, mêmes liens d'origine du guide (un/deux/trois), toujours SANS aucun lien ajouté.
       [B]v3.7.9[/B] 02/11/2026
 - CORRECTION DE L'INSTALLATION : depuis la 3.7.5, l'archive zip était emballée sans son dossier « plugin.video.sporthdme/ » (fichiers posés à la racine du zip) -> Kodi refusait l'installation de la mise à jour (« La mise à jour a échoué »). Toutes les archives 3.7.5 -> 3.7.8 ont été ré-emballées au bon format ; la 3.7.9 s'installe et se met à jour normalement.
 - Aucun autre changement : contenu identique à la 3.7.8 (ergonomie + visuel : titres lisibles, badge EN DIRECT, fiche de match, menu « Actualiser la grille », réglages d'affichage), toujours SANS aucun lien ajouté.

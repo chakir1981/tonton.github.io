@@ -285,13 +285,13 @@ def get_events(url):  # 5
         else:
             m_color = 'gold'
             state = u''
+        # v3.7.10 — langues du match dans le titre (« fr » d'abord, puis les
+        # autres : « Lorient vs Brest fr », « Sassuolo vs Fiorentina de it »).
+        # Remplace le compteur 3.7.8 qui comptait des chaînes et non des liens
+        # (les miroirs un/deux/trois triplent l'affichage -> chiffre trompeur).
         cnt = u''
-        if _setting_bool('show_link_count'):
-            n = _count_french(channels) if fr_only else len(channels or [])
-            if n:
-                cnt = u' [COLOR {0}]· {1} {2}{3}[/COLOR]'.format(
-                    'lime' if fr_only else 'dimgray', n, _links_word(n),
-                    u' FR' if fr_only else u'')
+        if _setting_bool('show_langs'):
+            cnt = _lang_suffix(_match_langs(channels))
         ftime_s = u'[COLOR cyan]{}[/COLOR]'.format(ftime)
         name = u'{0}{1} [COLOR {2}][B]{3}[/B][/COLOR]{4} - [I]{5}[/I]{6}'.format(
             (emo + u' ') if emo else u'', ftime_s, m_color, event, state,
@@ -477,22 +477,65 @@ def _db_index():
     return idx
 
 
-def _count_french(channels):
-    """v3.7.8 — nombre de chaînes françaises d'un match (compteur affiché)."""
-    n = 0
+_LANG_ALIASES = {'french': u'fr', u'français': u'fr', 'francais': u'fr',
+                 'english': u'en', 'eng': u'en'}
+
+
+def _channel_lang(name, lang):
+    """v3.7.10 — code langue affichable d'une chaîne (« fr », « de », « it »…).
+    Le code explicite du guide/de la base fait foi (règle 3.7.1 : un code
+    non français rejette la chaîne) ; sans code, une chaîne reconnue
+    française par son nom vaut « fr », une inconnue renvoie '' (rien à
+    afficher plutôt qu'un code faux)."""
+    lang_s = six.ensure_text(lang or u'', encoding='utf-8', errors='replace').strip().lower()
+    if lang_s:
+        if lang_s in FRENCH_LANGS:
+            return u'fr'
+        if lang_s in _LANG_ALIASES:
+            return _LANG_ALIASES[lang_s]
+        if re.match(r'^[a-z]{2,3}$', lang_s):
+            return lang_s
+        return u''
+    if name and _is_french_source(name, u''):
+        return u'fr'
+    return u''
+
+
+def _match_langs(channels):
+    """v3.7.10 — langues distinctes d'un match, « fr » d'abord puis ordre
+    alphabétique ('fr' ; 'de', 'it' ; 'de it us'…). Mêmes sources que la liste
+    des liens à l'ouverture (dicts du guide ou base locale channels.json) :
+    ce qui est écrit dans le titre est exactement ce qu'on trouve dedans."""
+    found = []
     try:
         for ch in channels or []:
             if isinstance(ch, dict):
-                if _is_french_source(ch.get('name'), ch.get('language')):
-                    n += 1
+                tag = _channel_lang(ch.get('name'), ch.get('language'))
             else:
-                row = _db_channel(six.ensure_text(ch, encoding='utf-8', errors='replace'))
-                if row is not None and _is_french_source(row.get('channelName'),
-                                                         row.get('language')):
-                    n += 1
+                nm = six.ensure_text(ch, encoding='utf-8', errors='replace')
+                row = _db_channel(nm)
+                if row is not None:
+                    tag = _channel_lang(row.get('channelName'), row.get('language'))
+                else:
+                    tag = _channel_lang(nm, u'')
+            if tag and tag not in found:
+                found.append(tag)
     except Exception:
-        return n
-    return n
+        pass
+    rest = sorted(l for l in found if l != u'fr')
+    return ([u'fr'] + rest) if u'fr' in found else rest
+
+
+def _lang_suffix(langs):
+    """v3.7.10 — suffixe coloré du titre : « fr » en vert, autres en gris.
+    '' si aucune langue identifiée (titre inchangé)."""
+    parts = []
+    for l in langs:
+        if l == u'fr':
+            parts.append(u'[COLOR lime]fr[/COLOR]')
+        else:
+            parts.append(u'[COLOR dimgray]{0}[/COLOR]'.format(l))
+    return (u' ' + u' '.join(parts)) if parts else u''
 
 
 def _channels_have_french(channels):
@@ -609,10 +652,6 @@ def _sport_emoji(sport, league):
         if kw in hay:
             return emo
     return u''
-
-
-def _links_word(n):
-    return u'lien' if n == 1 else u'liens'
 
 
 def _chan_label(chan, lang, fr):
