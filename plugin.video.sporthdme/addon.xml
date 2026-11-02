@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.12" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.13" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -16,6 +16,10 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
+      [B]v3.7.13[/B] 02/11/2026
+- BÉTA SPORTONLINE — RÉSOLVEUR RENFORCÉ : le lien du lecteur (sous-domaine qui tourne à chaque chargement) est toujours frais à la demande ; si une page lecteur ne répond pas (403, lien expiré, coupure réseau), l'add-on recharge la page de la chaîne pour obtenir un lien NEUF et réessaie automatiquement (2 passes, référents alternés), et une erreur réseau ne fait plus planter la lecture.
+- RAPPEL ACTIVATION BÉTA (pour voir des matchs absents du guide habituel, ex. Reims vs Sochaux) : 1) mets l'add-on à jour, 2) Paramètres &gt; Réglages &gt; active « BÉTA — Source SportOnline », 3) retour au menu principal &gt; nouvelle entrée MAGENTA « BÉTA — Matchs SportOnline ». Sans activation, rien ne change (comportement 3.7.11 conservé).
+- Toujours SANS aucun lien ajouté aux ÉVÉNEMENTS EN DIRECT.
       [B]v3.7.12[/B] 02/11/2026
 - NOUVELLE OPTION BÉTA « SOURCE SPORTONLINE » (désactivée par défaut) : dans Paramètres &gt; Réglages, active « BÉTA — Source SportOnline » pour faire apparaître un menu « BÉTA — Matchs SportOnline » en MAGENTA. C'est une source de test INDÉPENDANTE de DaddyLive (ni un/deux/trois, ni le guide habituel) : une grille texte du jour (aujourd'hui + demain) où chaque chaîne DÉCLARE sa langue (« HD4 GREEK &amp; FRENCH ») — la détection du français est donc plus fiable que jamais, et des matchs absents du guide habituel apparaissent (ex. Ligue 2 : Red Star vs Nancy, Reims vs Sochaux, en chaîne française).
 - PRÉSENTATION IDENTIQUE AU RESTE DE L'ADD-ON : heure en cyan, équipes en or, badge vert « ● EN DIRECT », langues en MAJUSCULES magenta (FR en premier, en gras), fiche de match complète, liste de liens numérotée avec chaîne en or et FR en vert, roue d'attente pendant la résolution. Le réglage « Uniquement les sources françaises » et « Langues dans le titre » s'appliquent aussi à la BÉTA.

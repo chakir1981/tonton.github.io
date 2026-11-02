@@ -359,25 +359,41 @@ def list_events():
 
 
 def resolve(canal_url):
-    """…/channels/hd/hd4.php -> (m3u8, url_embed) ou None.
-    La page canal contient UNE iframe (embed xstream, sous-domaine qui
-    tourne) ; on la charge avec le bon Referer puis on tente toutes les
-    extractions connues (et une iframe imbriquée éventuelle)."""
-    page = _get(canal_url, referer='https://sportsonline.st/')
-    frames = extract_iframes(page)
-    for frame in frames:
-        emb = _get(frame, referer=canal_url)
-        fl = extract_stream(emb)
-        if fl:
-            return (fl, frame)
-        # iframe imbriquée : un niveau de plus (même arsenal)
-        for nested in extract_iframes(emb):
-            if nested == frame:
+    """…/channels/hd/hdN.php -> (m3u8, url_embed) ou None.
+
+    La page canal contient UNE iframe (embed « player by xstream.to »,
+    sous-domaine qui tourne à chaque chargement) ; on la charge avec le bon
+    Referer puis on tente toutes les extractions connues (et une iframe
+    imbriquée éventuelle). v3.7.13 : si l'embed ne livre rien (page 403,
+    lien expiré, coupure réseau), on re-télécharge la page canal pour
+    obtenir un lien NEUF et on réessaie (2 passes, Referer alternés) ; une
+    erreur réseau sur un niveau n'arrête plus les niveaux suivants et ne
+    remonte plus jusqu'à la lecture (aucune exception jetée)."""
+    referers = ('https://sportsonline.st/', 'https://sportsonline.si/')
+    for attempt in range(2):
+        try:
+            page = _get(canal_url, referer=referers[attempt % len(referers)])
+        except Exception:
+            continue
+        for frame in extract_iframes(page):
+            try:
+                emb = _get(frame, referer=canal_url)
+            except Exception:
                 continue
-            emb2 = _get(nested, referer=frame)
-            fl = extract_stream(emb2)
+            fl = extract_stream(emb)
             if fl:
-                return (fl, nested)
+                return (fl, frame)
+            # iframe imbriquée : un niveau de plus (même arsenal)
+            for nested in extract_iframes(emb):
+                if nested == frame:
+                    continue
+                try:
+                    emb2 = _get(nested, referer=frame)
+                except Exception:
+                    continue
+                fl = extract_stream(emb2)
+                if fl:
+                    return (fl, nested)
     return None
 
 
