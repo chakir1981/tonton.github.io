@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.15" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.16" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -16,6 +16,11 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
+      [B]v3.7.16[/B] 02/11/2026
+- « ÉVÉNEMENTS EN DIRECT » DEVIENT « MATCHS » : même contenu (matchs en cours et à venir, grille du jour), libellé plus court et plus clair.
+- OPTION « SOURCES FRANÇAISES » = SEULEMENT FR DANS LES TITRES : quand « Uniquement les sources françaises » est actif (c'est le cas par défaut), la ligne d'un match n'affiche plus que « FR » en magenta gras — les autres langues (DE, IT, US…) disparaissent du titre. Si l'option est désactivée, toutes les langues réapparaissent (FR toujours premier).
+- EMOJIS SUPPRIMÉS : les icônes emoji des sports (ballon de foot, raquette, panier…) ne s'affichaient pas sur plusieurs appareils Kodi/Android (aucune icône visible, cases vides) — elles sont retirées du code et le réglage « Icônes emoji des sports » disparaît ; la liste des matchs est désormais identique et propre sur tous les écrans.
+- Aucun autre changement : mêmes matchs, mêmes liens d'origine du guide, toujours SANS aucun lien ajouté.
       [B]v3.7.15[/B] 02/11/2026
 - RETOUR À LA VERSION AVANT LA BÉTA : la source BÉTA SportOnline est entièrement retirée à la demande de l'utilisateur — plus de menu « BÉTA — Matchs SportOnline », plus de réglage « BÉTA — Source SportOnline » dans les paramètres, plus aucun fichier de cette source.
 - Contenu identique à la v3.7.11 : mêmes matchs, même grille « ÉVÉNEMENTS EN DIRECT », titres de matchs épurés (sans la compétition), langues en MAJUSCULES magenta (FR premier, en gras), toujours SANS aucun lien ajouté.

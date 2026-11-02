@@ -110,8 +110,10 @@ def Main_menu():
     # menu -> le premier clic sur « ÉVÉNEMENTS EN DIRECT » est instantané.
     _refresh_matches_bg(Live_url)
     # v3.7.8 — descriptions des entrées du menu (panneau d'information du skin)
-    addDir(u'[B][COLOR white]ÉVÉNEMENTS EN DIRECT[/COLOR][/B]', Live_url, 'events', ICON, FANART, True,
-           infoLabels={'title': u'Événements en direct',
+    # v3.7.16 — « ÉVÉNEMENTS EN DIRECT » devient « MATCHS » (même contenu :
+    # matchs en cours et à venir, grille du jour).
+    addDir(u'[B][COLOR white]MATCHS[/COLOR][/B]', Live_url, 'events', ICON, FANART, True,
+           infoLabels={'title': u'Matchs',
                        'plot': u'Matchs en cours et à venir — grille du jour, sources françaises en priorité.'})
     # addDir('[B][COLOR gold]Channels 24/7[/COLOR][/B]', 'https://1.livesoccer.sx/program.php', 14, ICON, FANART, '')
     # addDir('[B][COLOR gold]Alternative VIEW [/COLOR][/B]', '', '', ICON, FANART, '')
@@ -120,7 +122,7 @@ def Main_menu():
     # addDir('[B][COLOR white]BEST LEAGUES[/COLOR][/B]', '', 2, ICON, FANART, '')
     addDir(u'[B][COLOR gold]Paramètres[/COLOR][/B]', 'set', 'settings', ICON, FANART, False,
            infoLabels={'title': u'Paramètres',
-                       'plot': u'Uniquement les sources françaises, fuseau horaire, affichage (emoji, compteurs, groupement).'})
+                       'plot': u'Uniquement les sources françaises, fuseau horaire, affichage (langues, groupement).'})
     addDir(u"[B][COLOR gold]Vider les données de l'add-on[/COLOR][/B]", 'clear', 'clear', ICON, FANART, False,
            infoLabels={'title': u"Vider les données de l'add-on",
                        'plot': u'Supprime le cache (grille, lecteurs) et la base de chaînes locales.'})
@@ -273,9 +275,10 @@ def get_events(url):  # 5
             is_live = True
         finished = (not is_live) and now_time_in_ms > compare + duration_in_ms
 
-        # v3.7.8 — habillage : emoji du sport, badge d'état, compteur de
-        # liens, et une fiche lisible (plot) pour le panneau d'information.
-        emo = _sport_emoji(sport, lname)
+        # v3.7.16 — les icônes emoji des sports sont RETIRÉES (elles ne
+        # s'affichaient pas sur plusieurs appareils Kodi/Android : aucune
+        # icône visible ou cases vides) ; restent le badge d'état, les
+        # langues et la fiche (plot) pour le panneau d'information.
         if is_live:
             m_color = 'lime'
             state = u' [COLOR lime][B]● EN DIRECT[/B][/COLOR]'
@@ -297,8 +300,8 @@ def get_events(url):  # 5
         if _setting_bool('show_langs'):
             cnt = _lang_suffix(_match_langs(channels))
         ftime_s = u'[COLOR cyan]{}[/COLOR]'.format(ftime)
-        name = u'{0}{1} [COLOR {2}][B]{3}[/B][/COLOR]{4}{5}'.format(
-            (emo + u' ') if emo else u'', ftime_s, m_color, event, state, cnt)
+        name = u'{0} [COLOR {1}][B]{2}[/B][/COLOR]{3}{4}'.format(
+            ftime_s, m_color, event, state, cnt)
 
         # fiche du match (infoLabels) — texte brut, sans balises Kodi
         plot = []
@@ -534,7 +537,12 @@ def _lang_suffix(langs):
     en MAGENTA — couleur non utilisée ailleurs dans l'add-on (or = équipes,
     vert = EN DIRECT et FR de la liste des liens, cyan = heure, gris =
     miroirs) ; « FR » toujours premier et en gras, les autres suivent dans
-    l'ordre alphabétique. '' si aucune langue identifiée (titre inchangé)."""
+    l'ordre alphabétique. '' si aucune langue identifiée (titre inchangé).
+    v3.7.16 — quand « Uniquement les sources françaises » est actif (défaut),
+    seul FR est affiché : les autres langues ne concernent pas le filtrage
+    français et alourdissent la ligne du match."""
+    if _french_only():
+        langs = [u'fr'] if u'fr' in langs else []
     parts = []
     for l in langs:
         if l == u'fr':
@@ -616,48 +624,11 @@ def _plain(text):
         return text or u''
 
 
-# Ordre IMPORTANT : 'american' avant 'foot' (american football), 'table'
-# avant 'tennis' (table tennis), 'nba'/'nhl'/'ufc' etc. d'abord car plus précis.
-_SPORT_EMOJI = (
-    (u'american', u'🏈'), (u'nfl', u'🏈'),
-    (u'table', u'🏓'), (u'ping', u'🏓'),
-    (u'basket', u'🏀'), (u'nba', u'🏀'),
-    (u'foot', u'⚽'), (u'soccer', u'⚽'), (u'calcio', u'⚽'),
-    (u'futbol', u'⚽'), (u'fussball', u'⚽'),
-    (u'tennis', u'🎾'), (u'atp', u'🎾'), (u'wta', u'🎾'),
-    (u'wimbledon', u'🎾'), (u'roland', u'🎾'),
-    (u'hockey', u'🏒'), (u'nhl', u'🏒'),
-    (u'baseball', u'⚾'), (u'mlb', u'⚾'),
-    (u'volley', u'🏐'),
-    (u'handball', u'🤾'), (u'hand', u'🤾'),
-    (u'boxe', u'🥊'), (u'boxing', u'🥊'), (u'ufc', u'🥊'),
-    (u'mma', u'🥊'), (u'fight', u'🥊'),
-    (u'rugby', u'🏉'),
-    (u'cricket', u'🏏'),
-    (u'golf', u'⛳'),
-    (u'f1', u'🏎'), (u'formula', u'🏎'), (u'formule', u'🏎'),
-    (u'moto', u'🏍'), (u'nascar', u'🏎'),
-    (u'dart', u'🎯'),
-    (u'snooker', u'🎱'), (u'billard', u'🎱'), (u'pool', u'🎱'),
-    (u'cycl', u'🚴'),
-    (u'swim', u'🏊'), (u'natation', u'🏊'), (u'polo', u'🤽'),
-    (u'ski', u'⛷'), (u'snowboard', u'🏂'),
-    (u'chess', u'♟'), (u'échec', u'♟'), (u'echec', u'♟'),
-    (u'esport', u'🎮'), (u'e-sport', u'🎮'), (u'counter', u'🎮'),
-    (u'dota', u'🎮'), (u'league of legends', u'🎮'),
-    (u'athlet', u'🏃'), (u'athlét', u'🏃'), (u'marathon', u'🏃'),
-)
-
-
-def _sport_emoji(sport, league):
-    """Icône emoji du sport (réglage « Icônes emoji des sports »)."""
-    if not _setting_bool('show_emoji'):
-        return u''
-    hay = u'{0} {1}'.format(sport or u'', league or u'').lower()
-    for kw, emo in _SPORT_EMOJI:
-        if kw in hay:
-            return emo
-    return u''
+# v3.7.16 — les icônes emoji des sports (ballon, raquette, panier…) ont été
+# RETIRÉES : elles ne s'affichaient pas sur plusieurs appareils Kodi/Android
+# (aucune icône visible ou cases vides dans les listes). Le réglage « Icônes
+# emoji des sports » disparaît en même temps ; la liste des matchs est
+# désormais identique sur tous les écrans.
 
 
 def _chan_label(chan, lang, fr):
