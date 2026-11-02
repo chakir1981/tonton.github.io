@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.6" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.7" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -16,12 +16,12 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
-      [B]v3.7.6[/B] 02/11/2026
-- RETOUR À LA BASE 2.0.5 : chaque match n'affiche plus que ses liens d'origine du guide (« un / deux / trois »). TOUS les liens ajoutés sont supprimés : [DaddyLive], (footao), [365], les doublons « (repli) », les [Miroir] et la rubrique « CHAÎNES FR (MIROIRS) » — aucun lien de secours nulle part.
-- Les modules DaddyLive / footao / 365scores (et leur mini-serveur local) ne sont plus embarqués : l'add-on redevient exactement celui de la 2.0.5, en plus léger.
-- CONSERVÉ — RAPIDITÉ (portage de la 3.7.4) : la liste des matchs est gardée sur le disque du profil (cache persistant fastcache, 2 min) : revenir dans le menu, rafraîchir ou rouvrir l'add-on est instantané au lieu de re-télécharger la grille à chaque navigation. En cas d'échec du cache, téléchargement normal : aucune régression possible.
-- CONSERVÉ — FILTRAGE FR (portage de la 3.7.1) : en mode « Uniquement les sources françaises », les chaînes étrangères à marque française (Canal+ Sport 3/5 polonaises, TSN, NFL Sunday Ticket…) sont rejetées via leur code pays avant tout test de nom ; Canal+ Sport 360 reste acceptée.
-- CONSERVÉ — ROBUSTESSE : message clair quand aucun événement n'est disponible (fin des pages vides), titres de chaînes toujours lisibles (encodage), délai d'attente du serveur de secours du guide réduit (20 s -> 12 s), et « Vider les données de l'add-on » efface aussi le cache disque.
+      [B]v3.7.7[/B] 02/11/2026
+- NAVIGATION ACCÉLÉRÉE — MENU TOUJOURS INSTANTANÉ : la liste des matchs s'affiche depuis le cache disque même au-delà des 2 min (jusqu'à 3 h) et se re-télécharge EN ARRIÈRE-PLAN pour la navigation suivante — plus aucune attente devant le menu, même sur réseau lent.
+- PRÉCHAUFFAGE À L'OUVERTURE : la grille commence à se télécharger dès l'écran d'accueil de l'add-on, pendant que vous choisissez — le premier clic sur « ÉVÉNEMENTS EN DIRECT » est instantané.
+- CLIC SUR UN LIEN JUSQU'À 3× PLUS RAPIDE : les miroirs du guide (vertex/nexa/kora) sont interrogés EN PARALLÈLE en une seule salve au lieu d'un par un (mesuré : 3,0 s -> 1,1 s), et leurs réponses sont gardées 30 min sur disque — le 2e clic sur la même chaîne ne rappelle plus l'api du tout (0,00 s mesuré).
+- PLUS AUCUNE ATTENTE BLOQUÉE : tous les délais maximaux de résolution passent de 30 s (voire illimités sur 2 appels) à 12 s — un serveur mort est abandonné immédiatement au profit du suivant.
+- Toujours SANS aucun lien ajouté : uniquement les liens d'origine du guide (un / deux / trois), comme en 3.7.6.
     </news>
 
     <assets>

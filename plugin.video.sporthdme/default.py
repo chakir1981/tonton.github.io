@@ -27,6 +27,7 @@ try:
     from resources.modules import fastcache as fastcache
 except Exception:
     fastcache = None
+import threading
 import time
 from dateutil.parser import parse
 from dateutil.tz import gettz
@@ -104,6 +105,10 @@ def Main_menu():
     # « Événements en direct » (doublon embedlivesports), « Football Libre »
     # et « Football Libre MOV » ne sont plus proposées (les modules et les
     # modes du routeur restent en place, simplement sans entrée de menu).
+    # v3.7.7 — préchauffage : la grille des matchs se télécharge en
+    # arrière-plan dès l'écran d'accueil, pendant que l'utilisateur lit le
+    # menu -> le premier clic sur « ÉVÉNEMENTS EN DIRECT » est instantané.
+    _refresh_matches_bg(Live_url)
     addDir(u'[B][COLOR white]ÉVÉNEMENTS EN DIRECT[/COLOR][/B]', Live_url, 'events', ICON, FANART, True)
     # addDir('[B][COLOR gold]Channels 24/7[/COLOR][/B]', 'https://1.livesoccer.sx/program.php', 14, ICON, FANART, '')
     # addDir('[B][COLOR gold]Alternative VIEW [/COLOR][/B]', '', '', ICON, FANART, '')
@@ -118,7 +123,7 @@ def Main_menu():
 
 
 def _matches_from_page(url):
-    data = requests.get(url, timeout=20).text
+    data = requests.get(url, timeout=12).text
     data = six.ensure_text(data, encoding='utf-8', errors='ignore')
     data = re.sub('\t', '', data).replace('&nbsp', '')
 
@@ -133,30 +138,74 @@ def _matches_from_page(url):
     return json.loads(re.findall(old_pattern, events.replace(',false', ''), re.DOTALL)[0])
 
 
-def get_events(url):  # 5
+def _fetch_matches(url):
+    """v3.7.7 — télécharge la liste des matchs (page du guide, puis repli
+    JSON tvsport.guide) et l'écrit dans le cache disque (2 min). Retourne la
+    liste ou None ; toute panne réseau est silencieuse."""
     matches = None
-    # v3.7.6 — liste des matchs gardée 2 min sur disque (fastcache, portage
-    # de la 3.7.4) : revenir dans le menu (retour arrière, rafraîchissement,
-    # ré-ouverture de l'add-on) est instantané au lieu de re-télécharger la
-    # grille à chaque navigation. Échec du cache = téléchargement normal.
-    ck_ev = 'ev:' + url
-    if fastcache is not None:
-        matches = fastcache.fget(ck_ev, 120)
+    if url != Live_fallback_url:
+        try:
+            matches = _matches_from_page(url)
+        except Exception as e:
+            log_info('events page {0} failed: {1!r}'.format(url, e))
     if not matches:
-        if url != Live_fallback_url:
-            try:
-                matches = _matches_from_page(url)
-            except Exception as e:
-                log_info('events page {0} failed: {1!r}'.format(url, e))
-        if not matches:
-            # fallback: same schema served as plain JSON by tvsport.guide
-            try:
-                matches = requests.get(Live_fallback_url, headers={'User-Agent': client.agent()},
-                                       timeout=12).json().get('matches')
-            except Exception as e:
-                log_info('events fallback {0} failed: {1!r}'.format(Live_fallback_url, e))
-        if matches and fastcache is not None:
-            fastcache.fset(ck_ev, matches)
+        # fallback: same schema served as plain JSON by tvsport.guide
+        try:
+            matches = requests.get(Live_fallback_url, headers={'User-Agent': client.agent()},
+                                   timeout=12).json().get('matches')
+        except Exception as e:
+            log_info('events fallback {0} failed: {1!r}'.format(Live_fallback_url, e))
+    if matches and fastcache is not None:
+        fastcache.fset('ev:' + url, matches)
+        fastcache.flush()
+    return matches
+
+
+_WARM_INFLIGHT = set()
+_WARM_LOCK = threading.Lock()
+
+
+def _refresh_matches_bg(url):
+    """v3.7.7 — lance le (re)téléchargement de la grille en ARRIÈRE-PLAN
+    (fil daemon) : l'affichage, lui, part aussitôt du cache — la liste à
+    jour sera là à la navigation suivante. Un seul téléchargement à la fois
+    par URL (anti-doublon accueil + menu)."""
+    def _run():
+        with _WARM_LOCK:
+            if url in _WARM_INFLIGHT:
+                return
+            _WARM_INFLIGHT.add(url)
+        try:
+            _fetch_matches(url)
+        except Exception:
+            pass
+        finally:
+            with _WARM_LOCK:
+                _WARM_INFLIGHT.discard(url)
+    try:
+        t = threading.Thread(target=_run)
+        t.daemon = True
+        t.start()
+    except Exception:
+        pass
+
+
+def get_events(url):  # 5
+    # v3.7.6/3.7.7 — menu toujours instantané : la liste des matchs vit sur
+    # le disque du profil (fastcache, porté de la 3.7.4).
+    #   1) fraîche (< 2 min)           -> affichée telle quelle ;
+    #   2) plus ancienne (jusqu'à 3 h) -> affichée AUSSI, et re-téléchargée
+    #      en arrière-plan pour la navigation suivante ;
+    #   3) rien du tout                -> téléchargement direct (première
+    #      visite ; l'accueil préchauffe déjà ce téléchargement).
+    ck_ev = 'ev:' + url
+    matches = fastcache.fget(ck_ev, 120) if fastcache is not None else None
+    if not matches and fastcache is not None:
+        matches = fastcache.fstale(ck_ev, 3 * 3600)
+        if matches:
+            _refresh_matches_bg(url)
+    if not matches:
+        matches = _fetch_matches(url)
     if not matches:
         control.infoDialog(u"[COLOR red]Aucun match programmé.[/COLOR]", NAME, ICON, 5000)
         return
@@ -511,25 +560,68 @@ def resolve2(name, url):
                 if h not in hosts:
                     hosts.append(h)
 
+        # v3.7.7 — clic accéléré : les réponses api/player.php (l'URL du
+        # lecteur embarqué de chaque miroir) sont stables pendant toute la
+        # durée d'un événement -> cache disque 30 min (fastcache) et
+        # récupération EN PARALLÈLE sur tous les miroirs en une seule salve.
+        # Avant : 2 à 4 serveurs interrogés l'un après l'autre, jusqu'à
+        # ~2 min quand un miroir est tombé ; maintenant la salve attend le
+        # plus lent (souvent < 2 s) et le 2e clic ne rappelle plus l'api.
+        def _api_key(h):
+            return 'gap:{0}:{1}'.format(h, chan_id)
+
+        api_results = {}
+        to_fetch = []
+        for h in hosts:
+            v = fastcache.fget(_api_key(h), 1800) if fastcache is not None else None
+            if v:
+                api_results[h] = v
+            else:
+                to_fetch.append(h)
+
+        if to_fetch:
+            def _grab(h):
+                try:
+                    r = client.request(
+                        '{0}://{1}/api/player.php?id={2}'.format(uri0.scheme, h, chan_id),
+                        referer='{0}://{1}/'.format(uri0.scheme, h), timeout='12')
+                    if r:
+                        api_results[h] = six.ensure_text(r, encoding='utf-8', errors='replace')
+                        if fastcache is not None:
+                            fastcache.fset(_api_key(h), api_results[h])
+                except Exception:
+                    pass
+            if fastcache is not None:
+                fastcache.parallel_map(_grab, to_fetch, workers=4)
+            else:
+                for _h in to_fetch:
+                    _grab(_h)
+
         flink = None
         frame = None
         for host in hosts:
             try:
-                api_url = '{0}://{1}/api/player.php?id={2}'.format(uri0.scheme, host, chan_id)
                 api_ref = '{0}://{1}/'.format(uri0.scheme, host)
-                api_resp = six.ensure_text(client.request(api_url, referer=api_ref))
+                api_resp = api_results.get(host)
+                if not api_resp:
+                    # ni cache ni salve : un ultime essai direct, vite abandonné
+                    api_resp = six.ensure_text(client.request(
+                        '{0}://{1}/api/player.php?id={2}'.format(uri0.scheme, host, chan_id),
+                        referer=api_ref, timeout='12') or '')
                 cand_frame = json.loads(api_resp)['url']
                 cfg_url = cand_frame + ('&' if '?' in cand_frame else '?') + 'ppcfg=1&_=' + str(int(_time.time() * 1000))
                 try:
                     embed_html = six.ensure_str(
-                        client.request(cfg_url, referer=api_ref, headers={'User-Agent': ua_win}) or '')
+                        client.request(cfg_url, referer=api_ref, headers={'User-Agent': ua_win},
+                                       timeout='12') or '')
                 except Exception:
                     embed_html = ''  # e.g. 403 on ?ppcfg=1 -> plain page below
                 method, cand = _extract_stream(embed_html)
                 if not cand:  # ?ppcfg=1 refused -> plain frame page
                     try:
                         method, cand = _extract_stream(six.ensure_str(
-                            client.request(cand_frame, referer=api_ref, headers={'User-Agent': ua_win})))
+                            client.request(cand_frame, referer=api_ref,
+                                           headers={'User-Agent': ua_win}, timeout='12')))
                     except Exception:
                         pass
                 frame_host = urlparse(cand_frame).netloc
@@ -563,7 +655,7 @@ def resolve2(name, url):
     elif any(i in url for i in resolved):
         Dialog.notification(NAME, u"[COLOR skyblue]Résolution du lien en cours…[/COLOR]", ICON, 2000, False)
         referer = '{uri.scheme}://{uri.netloc}/'.format(uri=urlparse(url))
-        r = six.ensure_str(client.request(url))
+        r = six.ensure_str(client.request(url, timeout='12'))
         if 'get_content.php?channel=' in r or 'api/player.php?id=' in r:
             id_ = re.findall(r'(\d+)$', url)[0]
             if 'get_content.php?channel=' in r:
@@ -582,15 +674,15 @@ def resolve2(name, url):
                     'user-agent': ua_win,
                 }
                 params = {'id': id_, }
-            r = six.ensure_str(requests.get(frame, params=params, headers=hdr).content)
+            r = six.ensure_str(requests.get(frame, params=params, headers=hdr, timeout=12).content)
         if 'fid=' in r:
             regex = '''<script>fid=['"](.+?)['"].+?text/javascript.*?src=['"](.+?)['"]></script>'''
             vid, getembed = re.findall(regex, r, re.DOTALL)[0]
             getembed = 'https:' + getembed if getembed.startswith('//') else getembed
-            embed = six.ensure_str(client.request(getembed))
+            embed = six.ensure_str(client.request(getembed, timeout='12'))
             embed = re.findall(r'''document.write.+?src=['"](.+?player)=''', embed, re.DOTALL)[0]
             host = '{}=desktop&live={}'.format(embed, str(vid))
-            data = six.ensure_str(client.request(host, referer=referer))
+            data = six.ensure_str(client.request(host, referer=referer, timeout='12'))
             try:
                 link = re.findall(r'''return\((\[.+?\])\.join''', data, re.DOTALL)[0]
             except IndexError:
@@ -606,7 +698,7 @@ def resolve2(name, url):
                 frame = client.parseDOM(r, 'iframe', ret='src')[-1]
             # xbmc.log('FRAME: {}'.format(frame))
             referer = '{uri.scheme}://{uri.netloc}'.format(uri=urlparse(frame))
-            data = six.ensure_str(client.request(frame, referer=url, output=url))
+            data = six.ensure_str(client.request(frame, referer=url, output=url, timeout='12'))
             try:
                 data = re.findall(r'''script>(eval.+?\{\}\))\)''', data, re.DOTALL)[-1]
                 from resources.modules import jsunpack
@@ -642,7 +734,7 @@ def resolve2(name, url):
                                        re.DOTALL)[0]
                         pk = pk[:53] + pk[53 + 1:]
                         link = hlsurl.replace('" + ea + "', ea) + pk
-                        link_data = six.ensure_str(client.request(link))
+                        link_data = six.ensure_str(client.request(link, timeout='12'))
                         flink = re.findall('.*(http.+?$)', link_data)[0]
                 except Exception as e:
                     xbmcgui.Dialog().textviewer('e', str(e))
@@ -683,13 +775,13 @@ def resolve2(name, url):
                     origin = '{}://{}'.format(pu.scheme or 'https', pu.netloc)
                     ref_for_headers = frame or referer
                     try:
-                        client.request(auth_url, referer=ref_for_headers)
+                        client.request(auth_url, referer=ref_for_headers, timeout='12')
                     except Exception:
                         pass
 
                     # server_lookup για server_key
                     lookup_url = urljoin(origin, '/server_lookup.php?channel_id=' + quote_plus(channel_key))
-                    body = six.ensure_str(client.request(lookup_url, referer=ref_for_headers))
+                    body = six.ensure_str(client.request(lookup_url, referer=ref_for_headers, timeout='12'))
 
                     server_key = ''
                     try:
@@ -722,7 +814,7 @@ def resolve2(name, url):
                     working = None
                     for u in candidates:
                         try:
-                            chunk = client.request(u, referer=ref_for_headers)
+                            chunk = client.request(u, referer=ref_for_headers, timeout='12')
                             s = six.ensure_str(chunk) if chunk is not None else ''
                             if s.startswith('#EXTM3U') or len(s) > 0:
                                 working = u
@@ -758,7 +850,7 @@ def resolve2(name, url):
                         flink = re.findall(r'''source:\s*["'](.+?)['"]''', data, re.DOTALL)[0]
                     except IndexError:
                         ea = re.findall(r'''ajax\(\{url:\s*['"](.+?)['"],''', data, re.DOTALL)[0]
-                        ea = six.ensure_text(client.request(ea)).split('=')[1]
+                        ea = six.ensure_text(client.request(ea, timeout='12')).split('=')[1]
                         flink = re.findall('''videoplayer.src = "(.+?)";''', ea, re.DOTALL)[0]
                         flink = flink.replace('" + ea + "', ea)
             stream_headers = {'Referer': referer + '/', 'Origin': referer, 'User-Agent': ua_win,
