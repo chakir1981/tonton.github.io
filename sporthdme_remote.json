@@ -6,6 +6,5 @@
     "Canal+ France": 51,
     "Canal+ Sport": 52
   },
-  "spo_prog_urls": [],
-  "note": "SportHD v3.7.18 — 1) spo_prog_urls : domaines de la grille prog.txt de la source BÉTA SportOnline ; si la source change de domaine, ajoutez ici les nouvelles URLs (essayées AVANT la liste intégrée de l'add-on, cache 6 h), sans nouvelle version. 2) domains / fr_mirrors : mécanismes 3.7.5 conservés pour mémoire (non lus depuis le retour à la base 3.7.11)."
+  "note": "SportHD v3.7.19 — domains / fr_mirrors : mécanismes 3.7.5 conservés pour mémoire (non lus depuis le retour à la base 3.7.11). La clé spo_prog_urls (source BÉTA SportOnline, présente en 3.7.17-3.7.18) a été retirée en même temps que la source BÉTA."
 }

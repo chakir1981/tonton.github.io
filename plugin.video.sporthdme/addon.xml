@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.18" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.19" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -16,6 +16,10 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
+      [B]v3.7.19[/B] 03/11/2026
+- SUPPRESSION DE LA SOURCE BÉTA (à la demande de l'utilisateur) : la liste « MATCHS BÉTA » (SportOnline) disparaît entièrement — plus de menu, plus de badge [BÉTA], plus de réglage « BÉTA — Matchs SportOnline » dans Paramètres, plus aucun fichier de cette source ; un éventuel réglage BÉTA restant sur votre appareil est simplement ignoré.
+- « MATCHS » NE CHANGE PAS : mêmes matchs, mêmes liens d'origine du guide, langues dans le titre (FR seul quand « Uniquement les sources françaises » est actif), toujours SANS aucun lien ajouté.
+- Pourquoi 3.7.19 ? Kodi refuse d'installer une version plus ancienne que celle déjà présente ; le contenu redevient celui de la 3.7.16, seul le numéro avance pour que la mise à jour s'installe normalement.
       [B]v3.7.18[/B] 03/11/2026
 - LECTURE BÉTA PLUS FIABLE : le flux est maintenant VÉRIFIÉ avant d'être joué — l'add-on teste le lien vidéo (une seconde au maximum) et si la première adresse ne répond pas, il bascule automatiquement sur l'adresse de secours du même lecteur, puis re-demande un lien tout neuf (jusqu'à 3 essais). Fini le message « erreur » sans recours sur un flux qui vient de mourir.
 - DISTINCTION BÉTA RENFORCÉE : vignette dédiée avec bandeau magenta « BÉTA » (visible aussi en mode vignettes du skin), compteur à l'entrée du menu — « MATCHS BÉTA (9 FR / 41) » vous dit tout de suite combien de matchs français sont dans la liste — et menu contextuel « Actualiser la grille BÉTA » (clic droit / touche menu sur un match) comme dans la grille principale.
