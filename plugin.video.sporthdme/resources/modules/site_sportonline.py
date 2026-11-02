@@ -57,6 +57,30 @@ PROG_URLS = (
     'https://sportsonline.to/prog.txt',
     'https://ww1.sportsonnline.click/prog.txt',
 )
+BASE_PROG_URLS = PROG_URLS
+
+
+def set_prog_urls(urls):
+    """v3.7.18 — domaines prog.txt DISTANTS (sporthdme_remote.json, clé
+    spo_prog_urls) essayés AVANT la liste intégrée : si la source change
+    de domaine, la correction est poussée à distance sans nouvelle version
+    de l'add-on. Domaines inconnus/malformés ignorés, doublons fusionnés,
+    jamais d'exception."""
+    global PROG_URLS
+    try:
+        extra = []
+        for u in (urls or []):
+            u = (u or u'').strip()
+            if u.startswith('http') and u not in extra:
+                extra.append(u)
+        if extra:
+            merged = list(extra)
+            for u in BASE_PROG_URLS:
+                if u not in merged:
+                    merged.append(u)
+            PROG_URLS = tuple(merged)
+    except Exception:
+        pass
 
 DAYS = {'MONDAY': 0, 'TUESDAY': 1, 'WEDNESDAY': 2, 'THURSDAY': 3,
         'FRIDAY': 4, 'SATURDAY': 5, 'SUNDAY': 6}
@@ -165,6 +189,84 @@ def _duration_min(sport, title):
     return DEFAULT_DURATION_MIN
 
 
+# ---- repli FR strict (v3.7.18) ----------------------------------------------
+# prog.txt DÉCLARE normalement la langue de chaque chaîne (« HD10 FRENCH »),
+# mais 8 canaux sur 25 du jour (sporttv*, eleven*, btv…) restent sans
+# déclaration : leurs matchs disparaissent quand « Uniquement les sources
+# françaises » est actif. Repli : équipes/compétitions françaises, avec une
+# liste ÉTROITE — mesure du jour : sans les garde-fous, « ATP Masters 1000 -
+# Paris 2026 » et « Villarreal U19 vs PSG U19 » seraient des faux positifs
+# (catégories jeunes exclues, mots entiers seulement, Red Star Belgrade et
+# Dinamo Brest explicitement évités).
+
+_FR_ACCENTS = {
+    u'à': u'a', u'â': u'a', u'ä': u'a', u'é': u'e', u'è': u'e', u'ê': u'e',
+    u'ë': u'e', u'î': u'i', u'ï': u'i', u'ô': u'o', u'ö': u'o', u'ù': u'u',
+    u'û': u'u', u'ü': u'u', u'ç': u'c', u'ñ': u'n',
+    u'À': u'a', u'Â': u'a', u'É': u'e', u'È': u'e', u'Ê': u'e', u'Î': u'i',
+    u'Ô': u'o', u'Û': u'u', u'Ç': u'c', u'’': u' ',
+}
+
+# Équipes FR (Ligue 1 / Ligue 2 / National) — normalisées sans accent.
+_FR_TEAMS = (
+    'psg', 'paris saint germain', 'paris fc', 'marseille', 'olympique marseille',
+    'lyon', 'olympique lyonnais', 'monaco', 'lille', 'losc', 'nice', 'lens',
+    'rennes', 'lorient', 'toulouse', 'montpellier', 'nantes',
+    'strasbourg', 'metz', 'clermont', 'le havre', 'angers', 'auxerre',
+    'saint etienne', 'reims',
+    'sochaux', 'nancy', 'grenoble', 'annecy', 'pau', 'rodez', 'dunkerque',
+    'laval', 'troyes', 'bastia', 'ajaccio', 'guingamp', 'caen', 'amiens',
+    'valenciennes', 'quevilly', 'concarneau', 'chateauroux', 'niort',
+    'versailles', 'martigues', 'boulogne', 'orleans', 'bourg en bresse',
+)
+
+# Compétitions FR + sélection nationale.
+_FR_EXTRA = ('france', 'ligue 1', 'ligue 2', 'coupe de france',
+             'trophee des champions', 'betclic elite', 'top 14', 'pro d2')
+
+# Catégories à exclure du repli (jeunes/réserves : diffusion FR non garantie).
+_FR_BLOCK = ('u17', 'u18', 'u19', 'u20', 'u21', u'réserve', 'reserve', 'youth',
+             'espoirs')
+
+
+def _norm_fr(text):
+    """Normalisation pour comparaison : sans accent, minuscules, séparateurs
+    unifiés (« Saint-Étienne » -> « saint etienne »)."""
+    t = (text or u'').translate(_FR_ACCENTS).lower()
+    return re.sub(r'[^a-z0-9]+', ' ', t).strip()
+
+
+def _w(kw):
+    """Mot(s) ENTIER(s) : ni précédé ni suivi d'une lettre/chiffre
+    (« pau » ne matche pas « paulista »)."""
+    return re.compile(r'(?<![a-z0-9])' + kw + r'(?![a-z0-9])')
+
+_FR_PATTERNS = [_w(k) for k in _FR_TEAMS] + [_w(k) for k in _FR_EXTRA]
+# « Red Star » tout seul = club FR ; « Red Star Belgrade » = Serbie.
+_FR_PATTERNS.append(re.compile(r'(?<![a-z0-9])red star(?! (belgrade|beograd))'
+                               r'(?![a-z0-9])'))
+# « Brest » = club FR ; « Dinamo Brest » = Biélorussie.
+_FR_PATTERNS.append(re.compile(r'(?<![a-z0-9])(?<!dinamo )brest(?![a-z0-9])'))
+_FR_BLOCK_RES = [_w(k) for k in _FR_BLOCK]
+
+
+def fr_fallback(title):
+    """v3.7.18 — True si le libellé du match est clairement français
+    (clubs L1/L2/National, sélection, compétitions FR). Strict par
+    conception : il ne sert qu'à rattraper les canaux SANS déclaration de
+    langue quand « Uniquement les sources françaises » est actif."""
+    t = _norm_fr(title)
+    if not t:
+        return False
+    for rx in _FR_BLOCK_RES:
+        if rx.search(t):
+            return False
+    for rx in _FR_PATTERNS:
+        if rx.search(t):
+            return True
+    return False
+
+
 def parse_prog(txt, now=None):
     """Grille prog.txt -> liste d'événements normalisés (tri chronologique).
 
@@ -266,54 +368,64 @@ def extract_iframes(page_html):
     return out
 
 
-def extract_stream(embed_html):
-    """Tente d'extraire le flux final d'une page lecteur. Retourne l'URL
-    (m3u8 en général) ou None. Mêmes formes que les hébergeurs déjà traités
-    par l'add-on (DaddyLive, futbollibre…)."""
+def extract_streams(embed_html):
+    """v3.7.18 — LISTE ORDONNÉE des flux candidats d'une page lecteur.
+
+    Le résolveur valide chaque candidat (GET court du manifest, cf.
+    validate_m3u8) et joue le premier qui répond vraiment :
+      1) stream_url (P2P SwarmCloud, servie en HLS classique) — mesurée 200
+         avec segments .ts jouables quand stream_url_nop2p répondait 403 ;
+      2) stream_url_nop2p ;
+      3) les autres formes connues de l'add-on (m3u8 direct, config JSON
+         ?ppcfg=1, Playerjs/Clappr, char-array, jsunpack).
+    Dédoublonné en conservant l'ordre de préférence. Le module econfig
+    (résolveurs DaddyLive) n'est pas modifié."""
     html = embed_html or u''
     if not html:
-        return None
-    # 1) m3u8 / mpd direct dans la page
-    m = re.search(r'https?://[^\s"\'<>]+\.m3u8[^\s"\'<>]*', html)
-    if m:
-        return m.group(0)
-    # 2) config lecteur JSON ?ppcfg=1 (dinamic-embed)
-    try:
-        import json as _json
-        cfg = _json.loads(html.strip())
-        fl = cfg.get('src') or cfg.get('srcBase') or cfg.get('url')
-        if fl:
-            return absolutize(fl, '')
-    except Exception:
-        pass
-    # 3) Playerjs « file:"…" » / Clappr « source:"…" » / src:"…"
-    m = re.search(r'(?:file|source|src)\s*:\s*["\']([^"\']*(?:\.m3u8|\.mpd|/playlist)[^"\']*)["\']', html)
-    if m:
-        return absolutize(m.group(1), '')
-    # 4) blob window._econfig (embed dynmeadow, lecteur Clappr+SwarmCloud).
-    #    v3.7.17 — IMPORTANT : on décode ICI plutôt que d'appeler
-    #    econfig.extract_stream_from_html(), qui préfère stream_url_nop2p.
-    #    Mesures réseau du jour : chez dynmeadow, stream_url_nop2p répond
-    #    403 et c'est stream_url (URL P2P-assistée servie en HLS classique)
-    #    qui répond 200 avec des segments .ts jouables. On essaie donc
-    #    stream_url D'ABORD, avec repli sur stream_url_nop2p. Le module
-    #    econfig (résolveurs DaddyLive) n'est pas modifié.
+        return []
+    out = []
+    # 1) blob window._econfig (embed dynmeadow/tossequip, Clappr+SwarmCloud) :
+    #    stream_url D'ABORD, repli stream_url_nop2p.
     try:
         from resources.modules import econfig as _econfig
         raw = _econfig.find_econfig(html)
         if raw:
             cfg = _econfig.decode(raw)
-            fl = cfg.get('stream_url') or cfg.get('stream_url_nop2p')
-            if fl:
-                return absolutize(fl, '')
+            for k in ('stream_url', 'stream_url_nop2p'):
+                fl = cfg.get(k)
+                if fl:
+                    fl = absolutize(fl, '')
+                    if fl not in out:
+                        out.append(fl)
     except Exception:
         pass
+    # 2) m3u8 / mpd direct dans la page
+    for m in re.findall(r'https?://[^\s"\'<>]+\.m3u8[^\s"\'<>]*', html):
+        if m not in out:
+            out.append(m)
+    # 3) config lecteur JSON ?ppcfg=1 (dinamic-embed)
+    try:
+        import json as _json
+        cfg = _json.loads(html.strip())
+        fl = cfg.get('src') or cfg.get('srcBase') or cfg.get('url')
+        if fl:
+            fl = absolutize(fl, '')
+            if fl not in out:
+                out.append(fl)
+    except Exception:
+        pass
+    # 4) Playerjs « file:"…" » / Clappr « source:"…" » / src:"…"
+    m = re.search(r'(?:file|source|src)\s*:\s*["\']([^"\']*(?:\.m3u8|\.mpd|/playlist)[^"\']*)["\']', html)
+    if m:
+        fl = absolutize(m.group(1), '')
+        if fl not in out:
+            out.append(fl)
     # 5) char-array return(["…"].join(""))
     arr_m = re.search(r'return\s*\(\s*(\[(?:"[^"]*",?\s*)+\])', html)
     if arr_m:
         fl = u''.join(re.findall(r'"([^"]*)"', arr_m.group(1))).replace('\\/', '/')
-        if fl.startswith('http'):
-            return fl
+        if fl.startswith('http') and fl not in out:
+            out.append(fl)
     # 6) script packé eval(function(p,a,c,k,e,…)
     if 'eval(function(p,a,c,k,e' in html:
         try:
@@ -321,10 +433,51 @@ def extract_stream(embed_html):
             packed = re.search(r'(eval\(function\(p,a,c,k,e.*?\)\)\))', html, re.DOTALL)
             if packed:
                 unpacked = six_ensure(jsunpack.unpack(packed.group(1)))
-                return extract_stream(unpacked)
+                for fl in extract_streams(unpacked):
+                    if fl not in out:
+                        out.append(fl)
         except Exception:
             pass
-    return None
+    return out
+
+
+def extract_stream(embed_html):
+    """Premier flux candidat (compat 3.7.17). La VALIDATION de chaque
+    candidat (validate_m3u8) se fait dans resolve()."""
+    cands = extract_streams(embed_html)
+    return cands[0] if cands else None
+
+
+def validate_m3u8(url, referer=None, timeout=8, getter=None):
+    """v3.7.18 — le manifest est-il réellement jouable ? Un GET court du
+    m3u8 : HTTP 200 + contenu HLS plausible (#EXTM3U, segments .ts,
+    référence m3u8/mpd). Évite de donner à Kodi une URL morte (403 CDN,
+    lien expiré…) alors qu'un autre candidat répond. getter injectable
+    pour les tests ; toute erreur = False (jamais d'exception)."""
+    try:
+        if getter is None:
+            import requests as _requests
+            import urllib3 as _urllib3
+            try:
+                _urllib3.disable_warnings()
+            except Exception:
+                pass
+
+            def getter(u, ref=None, t=None):
+                r = _requests.get(u, headers={'User-Agent': UA,
+                                              'Referer': ref or ''},
+                                  timeout=t or timeout, verify=False)
+                return r.status_code, r.content
+        status, body = getter(url, ref=referer, t=timeout)
+        if status != 200:
+            return False
+        if isinstance(body, bytes):
+            body = (body or b'')[:4096].decode('utf-8', 'replace')
+        head = (body or u'').lower()
+        return ('#extm3u' in head or '.ts' in head or '.m3u8' in head
+                or '.mpd' in head)
+    except Exception:
+        return False
 
 
 def six_ensure(text):
@@ -373,21 +526,22 @@ def list_events():
     return parse_prog(fetch_prog())
 
 
-def resolve(canal_url):
+def resolve(canal_url, getter=None):
     """…/channels/hd/hdN.php -> (m3u8, url_embed) ou None.
 
-    La page canal contient UNE iframe (embed dynmeadow — v3.7.17 : la page
-    canal et l'embed répondent à nouveau 200 depuis n'importe quelle IP ;
-    sous-domaine qui tourne à chaque chargement) ; on la charge avec le bon
-    Referer puis on tente toutes les extractions connues (et une iframe
-    imbriquée éventuelle). v3.7.13 : si l'embed ne livre rien (page 403,
-    lien expiré, coupure réseau), on re-télécharge la page canal pour
-    obtenir un lien NEUF et on réessaie (2 passes, Referer alternés) ; une
-    erreur réseau sur un niveau n'arrête plus les niveaux suivants et ne
-    remonte plus jusqu'à la lecture (aucune exception jetée)."""
+    v3.7.18 — chaque flux candidat de l'embed est VALIDÉ (GET court du
+    manifest) avant d'être rendu : stream_url (P2P) essayé avant
+    stream_url_nop2p, le premier qui répond vraiment gagne. Si AUCUN ne
+    valide, le premier trouvé est quand même rendu — l'IP de l'utilisateur
+    peut passer là où la sonde échoue, et Kodi garde le message d'erreur
+    habituel sinon. 3 passes (v3.7.13 : l'embed peut répondre 403 à une IP
+    de serveur, le sous-domaine tourne à chaque chargement de la page
+    canal) avec référents alternés ; iframes imbriquées suivies d'un
+    niveau ; une erreur réseau sur un niveau n'arrête pas les suivants et
+    ne remonte jamais jusqu'à la lecture (aucune exception jetée)."""
     referers = ('https://sportsonline.st/', 'https://sportsonline.gl/',
                 'https://sportsonline.si/')
-    for attempt in range(2):
+    for attempt in range(3):
         try:
             page = _get(canal_url, referer=referers[attempt % len(referers)])
         except Exception:
@@ -397,10 +551,9 @@ def resolve(canal_url):
                 emb = _get(frame, referer=canal_url)
             except Exception:
                 continue
-            fl = extract_stream(emb)
-            if fl:
-                return (fl, frame)
-            # iframe imbriquée : un niveau de plus (même arsenal)
+            # candidats du niveau 1 + d'un niveau imbriqué éventuel,
+            # chacun avec SA page d'embed (le CDN exige ce Referer)
+            cands = [(fl, frame) for fl in extract_streams(emb)]
             for nested in extract_iframes(emb):
                 if nested == frame:
                     continue
@@ -408,9 +561,19 @@ def resolve(canal_url):
                     emb2 = _get(nested, referer=frame)
                 except Exception:
                     continue
-                fl = extract_stream(emb2)
-                if fl:
-                    return (fl, nested)
+                for fl in extract_streams(emb2):
+                    if fl not in [c[0] for c in cands]:
+                        cands.append((fl, nested))
+            if not cands:
+                continue
+            first = None
+            for fl, src in cands:
+                if first is None:
+                    first = (fl, src)
+                if validate_m3u8(fl, referer=src, getter=getter):
+                    return (fl, src)
+            # aucun validé : mieux vaut tenter le premier que ne rien rendre
+            return first
     return None
 
 
@@ -445,4 +608,23 @@ if __name__ == '__main__':
     fr2 = extract_iframes(html)
     assert fr2 and 'dynmeadow' in fr2[0], fr2
     print('iframe canal :', fr2[0][:70])
+    # v3.7.18 — repli FR strict
+    for ok_t in (u'Reims x Sochaux', u'Red Star x Nancy', u'PSG x Marseille',
+                 u'France x Italie', u'Saint-Étienne x Grenoble',
+                 u'Pau x Bastia', u'Coupe de France : PSG x Le Mans'):
+        assert fr_fallback(ok_t), ok_t
+    for ko_t in (u'ATP Masters 1000 - Paris 2026',
+                 u'Villarreal U19 vs PSG U19', u'Lazio x Roma',
+                 u'Palmeiras x Paulista', u'Red Star Belgrade x Celtic',
+                 u'Dinamo Brest x Zenit', u'Genclerbirligi x Kocaelispor'):
+        assert not fr_fallback(ko_t), ko_t
+    print('fr_fallback : %d positifs, %d negatifs OK'
+          % (7, 7))
+    # v3.7.18 — domaines distants
+    set_prog_urls(['https://miroir.example/prog.txt'])
+    assert PROG_URLS[0] == 'https://miroir.example/prog.txt', PROG_URLS
+    assert 'https://sportsonline.st/prog.txt' in PROG_URLS, PROG_URLS
+    set_prog_urls([])          # vide : liste intégrée conservée
+    assert PROG_URLS[0] == 'https://miroir.example/prog.txt', PROG_URLS
+    print('set_prog_urls OK :', len(PROG_URLS), 'domaines')
     print('OK')

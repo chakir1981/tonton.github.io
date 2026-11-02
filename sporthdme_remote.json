@@ -1,10 +1,11 @@
 {
-  "updated": "2026-11-02",
+  "updated": "2026-11-03",
   "domains": [],
   "fr_mirrors": {
     "Canal+ Foot": 50,
     "Canal+ France": 51,
     "Canal+ Sport": 52
   },
-  "note": "SportHD v3.7.5 — 1) domaines : domaines DaddyLive de secours (si thedaddy.pk / dlive.sx / dlhd.pk tombent tous les trois, ajoutez ici un miroir actif, ex. https://nouveau-domaine.xx) ; 2) fr_mirrors : table chaîne FR -> id du canal sur le réseau du guide (vertex/nexa/kora, /ch?id=N). Un nouveau miroir FR (ex. beIN Sports 1 France: 60) est découvert en moins de 6 h, sans nouvelle version de l'add-on."
+  "spo_prog_urls": [],
+  "note": "SportHD v3.7.18 — 1) spo_prog_urls : domaines de la grille prog.txt de la source BÉTA SportOnline ; si la source change de domaine, ajoutez ici les nouvelles URLs (essayées AVANT la liste intégrée de l'add-on, cache 6 h), sans nouvelle version. 2) domains / fr_mirrors : mécanismes 3.7.5 conservés pour mémoire (non lus depuis le retour à la base 3.7.11)."
 }

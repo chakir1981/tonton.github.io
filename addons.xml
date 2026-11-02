@@ -62,7 +62,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.17" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.18" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -79,6 +79,12 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
+      [B]v3.7.18[/B] 03/11/2026
+- LECTURE BÉTA PLUS FIABLE : le flux est maintenant VÉRIFIÉ avant d'être joué — l'add-on teste le lien vidéo (une seconde au maximum) et si la première adresse ne répond pas, il bascule automatiquement sur l'adresse de secours du même lecteur, puis re-demande un lien tout neuf (jusqu'à 3 essais). Fini le message « erreur » sans recours sur un flux qui vient de mourir.
+- DISTINCTION BÉTA RENFORCÉE : vignette dédiée avec bandeau magenta « BÉTA » (visible aussi en mode vignettes du skin), compteur à l'entrée du menu — « MATCHS BÉTA (9 FR / 41) » vous dit tout de suite combien de matchs français sont dans la liste — et menu contextuel « Actualiser la grille BÉTA » (clic droit / touche menu sur un match) comme dans la grille principale.
+- FILTRE FR PLUS MALIN : certaines chaînes de la source BÉTA n'ont pas de langue déclarée ; leurs matchs clairement français (clubs de Ligue 1/Ligue 2/National, équipe de France, Coupe de France…) restent visibles, marqués d'un discret « FR? » (FR supposé, pas déclaré par la source). Filtre strict : ni les catégories jeunes, ni Red Star Belgrade, ni Dinamo Brest ne sont pris pour des clubs français.
+- DOMAINE CORRIGEABLE À DISTANCE : si SportOnline change d'adresse, l'add-on peut être réparé sans nouvelle version (liste de secours lue dans une petite configuration distante, cache 6 h, échec réseau = liste intégrée).
+- NETTOYAGE : l'ancienne rubrique alternative « liveon.sx » (domaine mort) est retirée du code.
       [B]v3.7.17[/B] 03/11/2026
 - RETOUR DE LA SOURCE BÉTA (SportOnline), BIEN SÉPARÉE COMME DEMANDÉ : nouvelle entrée de menu « MATCHS BÉTA » en magenta, juste sous « MATCHS » — les deux listes ne se mélangent pas : la grille principale reste exactement celle d'origine, la BÉTA vit dans sa propre liste avec un badge [BÉTA] magenta sur chaque ligne.
 - CE QUE LA BÉTA APPORTE : la Ligue 2 et les matchs diffusés en français absents du guide (vérifié en direct : Reims – Sochaux, Red Star – Nancy), grille du jour + demain, heures UK converties en heure locale, et la langue de chaque chaîne DÉCLARÉE par la source (FR fiable).
@@ -122,6 +128,7 @@
     </assets>
   </extension>
 </addon>
+
 
 
 
