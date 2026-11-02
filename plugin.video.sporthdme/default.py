@@ -114,15 +114,6 @@ def Main_menu():
     addDir(u'[B][COLOR white]MATCHS[/COLOR][/B]', Live_url, 'events', ICON, FANART, True,
            infoLabels={'title': u'Matchs',
                        'plot': u'Matchs en cours et à venir — grille du jour, sources françaises en priorité.'})
-    # v3.7.20 — CHAÎNES FR : les chaînes françaises du guide sont des flux
-    # continus (24h/24) ; ce menu les rend jouables à tout moment, même
-    # sans match (la grille ne les montre que pendant les événements).
-    addDir(u'[B][COLOR white]CHAÎNES FR[/COLOR][/B] [COLOR dimgray](24h/24)[/COLOR]',
-           'frch', 'fr_channels', ICON, FANART, True,
-           infoLabels={'title': u'Chaînes françaises',
-                       'plot': u'Chaînes françaises du guide, diffusées en '
-                               u'continu — regardables à tout moment, même '
-                               u'sans match (Canal+ Foot, Canal+ France…).'})
     # addDir('[B][COLOR gold]Channels 24/7[/COLOR][/B]', 'https://1.livesoccer.sx/program.php', 14, ICON, FANART, '')
     # addDir('[B][COLOR gold]Alternative VIEW [/COLOR][/B]', '', '', ICON, FANART, '')
     # addDir('[B][COLOR white]SPORTS[/COLOR][/B]', '', 3, ICON, FANART, '')
@@ -648,144 +639,6 @@ def _chan_label(chan, lang, fr):
     elif lang:
         tag = u'[COLOR dimgray]{0}[/COLOR]'.format(lang)
     return u'[COLOR gold]{0}[/COLOR]{1}'.format(chan, u' ' + tag if tag else u'')
-
-
-# ---------------------------------------------------------------------------
-# v3.7.20 — CHAÎNES FR (24h/24) : les chaînes françaises déclarées par le
-# guide (Canal+ Foot, Canal+ France…) sont des flux CONTINUS : le lien de la
-# chaîne répond et se joue même quand aucun de ses matchs n'est en cours
-# (mesuré le 03/11/2026 : Canal+ Foot et Canal+ France 200 + #EXTM3U hors
-# match). La grille ne les fait apparaître que pendant les événements ;
-# ce menu les rend visibles et jouables À TOUT MOMENT, via le même
-# résolveur que les matchs (repli automatique vertex -> nexa -> kora).
-# La liste est dé-dupliquée par numéro de canal : le même flux est parfois
-# déclaré sous plusieurs noms (Canal+ France / Canal+ Live 1 / Ligue1+).
-# ---------------------------------------------------------------------------
-
-_FRCH_TTL = 1800          # cache 30 min
-
-
-def _fr_channels_from_guide():
-    """Construit la liste des chaînes françaises depuis la grille du jour
-    (cache 2 min ou téléchargement direct). [] si la grille est vide."""
-    matches = None
-    try:
-        if fastcache is not None:
-            matches = fastcache.fget('ev:' + Live_url, 120)
-    except Exception:
-        matches = None
-    if not matches:
-        matches = _fetch_matches(Live_url)
-    if not matches:
-        return []
-    try:
-        now_ms = datetime.now().timestamp() * 1000
-    except Exception:
-        now_ms = 0
-    chans = {}
-    for m in matches:
-        if not isinstance(m, dict):
-            continue
-        st = m.get('startTimestamp') or 0
-        dur = (m.get('duration') or 120) * 60 * 1000
-        live = bool(st and now_ms and st <= now_ms < st + dur)
-        t1 = m.get('team1')
-        t2 = m.get('team2')
-        titre = u'{0} vs {1}'.format(t1, t2) if t1 and t2 else (t1 or u'?')
-        try:
-            ftime = time_convert(st)
-        except Exception:
-            ftime = u''
-        for ch in (m.get('channels') or []):
-            if not isinstance(ch, dict):
-                continue
-            nm = ch.get('name') or u''
-            nm = six.ensure_text(nm, encoding='utf-8', errors='replace').strip()
-            if not nm or not _is_french_source(nm, ch.get('language')):
-                continue
-            links = []
-            for l in (ch.get('links') or []):
-                try:
-                    l = six.ensure_text(l, encoding='utf-8', errors='replace')
-                except Exception:
-                    continue
-                if 'id=' in l and l not in links:
-                    links.append(l)
-            if not links:
-                continue
-            cid = links[0].split('id=')[-1]
-            e = chans.setdefault(cid, {'names': [], 'links': [],
-                                       'live': False, 'matchs': []})
-            for l in links:
-                if l not in e['links']:
-                    e['links'].append(l)
-            if nm not in e['names']:
-                e['names'].append(nm)
-            e['live'] = e['live'] or live
-            if (titre, ftime, live) not in e['matchs']:
-                e['matchs'].append((titre, ftime, live))
-    out = []
-    for cid, e in chans.items():
-        out.append({'id': cid,
-                    'name': e['names'][0],
-                    'aliases': e['names'][1:],
-                    'links': e['links'],
-                    'live': e['live'],
-                    'matchs': e['matchs'][:5]})
-    out.sort(key=lambda x: x['name'].lower())
-    return out
-
-
-def fr_channels_menu():
-    """Menu « CHAÎNES FR » : chaque chaîne est jouable immédiatement via
-    play_stream (le résolveur des matchs, avec ses replis de miroirs).
-    Liste mise en cache 30 min ; indisponible = message, jamais d'exception."""
-    chans = None
-    try:
-        if fastcache is not None:
-            chans = fastcache.fget('frchan:list', _FRCH_TTL)
-    except Exception:
-        chans = None
-    if not chans:
-        try:
-            chans = _fr_channels_from_guide()
-        except Exception as e:
-            log_info('fr channels failed: {0!r}'.format(e))
-            chans = []
-        try:
-            if fastcache is not None and chans:
-                fastcache.fset('frchan:list', chans)
-                fastcache.flush()
-        except Exception:
-            pass
-    if not chans:
-        control.infoDialog(
-            u"[COLOR gold]Aucune chaîne française dans la grille du moment "
-            u"(réseau ?).[/COLOR]", NAME, ICON, 6000)
-        xbmcplugin.endOfDirectory(_handle)
-        return
-    for c in chans:
-        label = u'[B]{0}[/B]'.format(c['name'])
-        if c.get('live'):
-            label += u' [COLOR lime][B]● match en cours[/B][/COLOR]'
-        label += u' [COLOR dimgray]· 24h/24[/COLOR]'
-        plot = [u"Chaîne française diffusée en continu — regardable à tout "
-                u"moment, même sans match (la grille ne l'affiche que "
-                u"pendant les événements)."]
-        if c.get('aliases'):
-            plot.append(u'Aussi déclarée sous le nom : {0}.'
-                        .format(u', '.join(c['aliases'])))
-        if c.get('matchs'):
-            ms = u', '.join(u'{0} ({1})'.format(t, f or u'?')
-                            for (t, f, _lv) in c['matchs'])
-            plot.append(u'Matchs du jour sur cette chaîne : {0}.'.format(ms))
-        info = {'title': _plain(c['name']), 'plot': u'\n'.join(plot),
-                'genre': u'Chaîne française'}
-        addDir(label, c['links'][0], 'play_stream', ICON, c['name'],
-               isFolder=False, infoLabels=info)
-    log_info('chaînes FR : {0}'.format(len(chans)))
-    xbmcplugin.setContent(_handle, 'videos')
-    xbmcplugin.endOfDirectory(_handle)
 
 
 def get_stream(name, url):  # 4
@@ -1729,9 +1582,6 @@ def router(paramstring):
             get_stream(params['name'], params['url'])
         elif params['mode'] == 'play_stream':
             resolve2(params['description'], params['url'])
-        elif params['mode'] == 'fr_channels':
-            # v3.7.20 — menu « CHAÎNES FR (24h/24) »
-            fr_channels_menu()
         elif params['mode'] == 'settings':
             Open_settings()
         elif params['mode'] == 'refresh_events':
