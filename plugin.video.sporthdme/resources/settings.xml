@@ -9,5 +9,6 @@
     <category label="Expérimental (bêta)">
         <setting id="beta_custom_links" type="bool" label="[BÊTA] Liens personnalisés du guide (même source, rien d'ajouté)" default="false" />
         <setting id="beta_official_epg" type="bool" label="[BÊTA] Indiquer dans la fiche les chaînes FR officielles qui diffusent chaque match (grille TV publique — info seule)" default="false" />
+        <setting id="my_playlist_url" type="text" label="[BÊTA] Ma playlist : URL m3u / m3u_plus (Xtream) de VOTRE abonnement — ses chaînes correspondant aux matchs s'ajoutent dans la fiche. L'URL reste sur cet appareil, jamais publiée" default="" />
     </category>
 </settings>

@@ -885,6 +885,299 @@ def _epg_channels_for(event):
     return []
 
 
+# ---------------------------------------------------------------------------
+# v3.7.28 — « MA PLAYLIST » (bêta, Paramètres > Expérimental (bêta))
+#   L'utilisateur colle l'URL m3u / m3u_plus (Xtream) de SON PROPRE
+#   abonnement dans les réglages. L'add-on télécharge cette playlist
+#   UNIQUEMENT depuis son appareil, en extrait les chaînes live (ts / m3u8,
+#   VOD et DASH refusés), et dans la fiche d'un match, ses chaînes dont le
+#   nom correspond à une chaîne du match deviennent des entrées de lecture
+#   en plus des liens du guide, libellées « Ma playlist : … ».
+#   RÈGLE DU DÉPÔT : AUCUNE URL en dur, rien ne vient de nous — la playlist
+#   reste sur l'appareil (cache profil mypl.json, empreinte de l'URL
+#   seulement, jamais l'URL). Aucun inputstream ajouté (verrou).
+# ---------------------------------------------------------------------------
+
+_PL_QUALITY = (u'hd', u'fhd', u'sd', u'uhd', u'4k', u'8k', u'1080p', u'1080i',
+               u'720p', u'480p', u'576p', u'hevc', u'h265', u'h264',
+               u'backup', u'vip', u'iptv')
+_PL_JUNK_RE = re.compile(u'xxx|porn|adult|sexy|18\\+', re.I)
+
+
+def _mypl_url():
+    """URL « Ma playlist » des réglages, validée : schéma http(s), sans
+    espace, hôte présent, PAS de crochets (le template non rempli
+    « http://[adresse-du-serveur]:8080/… » est ainsi refusé — les portails
+    Xtream sont toujours en hôte:port). Chaîne vide si invalide.
+    JAMAIS écrite dans les logs."""
+    try:
+        u = six.ensure_text(ADDON.getSetting('my_playlist_url') or u'',
+                            encoding='utf-8', errors='replace').strip()
+    except Exception:
+        return u''
+    if not u.lower().startswith((u'http://', u'https://')):
+        return u''
+    if u' ' in u or u'[' in u or u']' in u:
+        return u''
+    try:
+        if not urlparse(u).hostname:
+            return u''
+    except Exception:
+        return u''
+    return u
+
+
+def _mypl_fp(url):
+    """Empreinte courte de l'URL (8 hex) : sert à invalider le cache quand
+    l'utilisateur change d'URL — l'URL elle-même n'est jamais stockée."""
+    try:
+        return hashlib.sha256(url.encode('utf-8')).hexdigest()[:8]
+    except Exception:
+        return u''
+
+
+def _mypl_cache_path():
+    return control.translatePath(ADDON_DATA + 'mypl.json')
+
+
+def _mypl_norm_key(s):
+    """Clé d'appariement des noms de chaînes : apostrophes typographiques
+    ramenées à l'ASCII (« L'Équipe » = « L'Equipe »), annotations entre
+    crochets/parenthèses retirées (« (1080p) [Geo-blocked] » des listes
+    publiques), normalisation sans accents, puis mots « qualité » retirés —
+    « beIN SPORTS 1 HD » et « beIN Sports 1 » donnent 'bein sports 1'."""
+    s = s.replace(u'\u2019', u"'").replace(u'\u2018', u"'")
+    s = s.replace(u'\u02bc', u"'")
+    s = re.sub(u'[\\[\\(][^\\]\\)]*[\\]\\)]', u' ', s)
+    toks = [t for t in _norm_txt(s).split() if t not in _PL_QUALITY]
+    return u' '.join(toks).strip()
+
+
+def _mypl_parse(txt):
+    """Texte M3U / m3u_plus -> {clé: [nom affiché, url]}.
+    Ne garde que les flux live (http direct) ; saute VOD (.mp4/.mkv/.avi,
+    /movie/, /series/), DASH (.mpd — DRM), player_api, groupes adultes ;
+    dédup par clé (première URL gagnante) ; plafond 5 000 chaînes."""
+    out = {}
+    disp = u''
+    tvg = u''
+    grp = u''
+    for raw in txt.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line[:7].lower() == u'#extinf':
+            m = re.search(u'tvg-name="([^"]*)"', line)
+            tvg = m.group(1).strip() if m else u''
+            m = re.search(u'group-title="([^"]*)"', line)
+            grp = m.group(1).strip() if m else u''
+            clean = re.sub(u'[a-zA-Z0-9_-]+="[^"]*"', u'', line)
+            i = clean.find(u',')
+            disp = clean[i + 1:].strip() if i >= 0 else u''
+            continue
+        if line[0] == u'#':
+            continue
+        # ligne URL
+        low = line.lower()
+        nm = disp or tvg
+        disp = u''
+        tvg = u''
+        grp_k = grp
+        grp = u''
+        if not low.startswith((u'http://', u'https://')):
+            continue
+        if _PL_JUNK_RE.search(grp_k) or _PL_JUNK_RE.search(nm):
+            continue
+        if any(x in low for x in (u'.mp4', u'.mkv', u'.avi', u'.mpd',
+                                  u'/movie/', u'/series/', u'player_api.php',
+                                  u'/dash/')):
+            continue
+        key = _mypl_norm_key(nm)
+        if key and len(key) >= 4 and key not in out:
+            out[key] = [nm, line]
+            if len(out) >= 5000:
+                break
+    return out
+
+
+def _mypl_read_cache():
+    """Dict du cache profil si son empreinte correspond à l'URL ACTUELLE,
+    sinon {} (URL changée -> cache considéré vide, il sera refait)."""
+    url = _mypl_url()
+    if not url:
+        return {}
+    fp = _mypl_fp(url)
+    try:
+        p = _mypl_cache_path()
+        if xbmcvfs.exists(p):
+            f = xbmcvfs.File(p)
+            try:
+                raw = f.read()
+                if isinstance(raw, bytes):
+                    raw = raw.decode('utf-8', 'replace')
+                d = json.loads(raw)
+            finally:
+                f.close()
+            if (isinstance(d, dict) and d.get('_fp') == fp
+                    and isinstance(d.get('chans'), dict)):
+                return d['chans']
+    except Exception:
+        pass
+    return {}
+
+
+def _mypl_build(url):
+    """Télécharge la playlist et écrit le cache du profil. Retourne le dict
+    ({} si échec). Le cache porte l'empreinte de l'URL, JAMAIS l'URL."""
+    try:
+        r = requests.get(url, headers={'User-Agent': client.agent()},
+                         timeout=(10, 45))
+        txt = six.ensure_text(r.content, encoding='utf-8', errors='replace')
+    except Exception as e:
+        log_info('my playlist: téléchargement échoué {0!r}'.format(e))
+        return {}
+    if u'#EXTM3U' not in txt[:4000]:
+        log_info('my playlist: la réponse n\'est pas une playlist M3U')
+        return {}
+    chans = _mypl_parse(txt)
+    if not chans:
+        log_info('my playlist: 0 chaîne live reconnue (VOD/DRM seulement ?)')
+        return {}
+    data = {'_fp': _mypl_fp(url), '_ts': _epg_today(), 'chans': chans}
+    try:
+        f = xbmcvfs.File(_mypl_cache_path(), 'w')
+        f.write(six.ensure_binary(json.dumps(data), encoding='utf-8'))
+        f.close()
+    except Exception as e:
+        log_info('my playlist: cache non écrit {0!r}'.format(e))
+    log_info('my playlist: {0} chaîne(s) live prête(s)'.format(len(chans)))
+    return chans
+
+
+_MYPL_BG = {'running': False}
+
+
+def _mypl_bg(url):
+    """Fil d'arrière-plan : la fiche ne bloque JAMAIS sur le téléchargement
+    (les playlists de portails font souvent plusieurs Mo)."""
+    if _MYPL_BG['running']:
+        return
+    _MYPL_BG['running'] = True
+    try:
+        _mypl_build(url)
+    except Exception as e:
+        log_info('my playlist bg: {0!r}'.format(e))
+    finally:
+        _MYPL_BG['running'] = False
+
+
+def _mypl_ensure():
+    """Retourne les chaînes disponibles MAINTENANT ({} tant que rien n'est
+    prêt) et lance le rafraîchissement en arrière-plan si besoin (cache
+    absent, URL changée, ou pas reconstruite aujourd'hui ; au plus 1 essai
+    par 15 min via fastcache)."""
+    url = _mypl_url()
+    if not url:
+        return {}
+    data = _mypl_read_cache()
+    stale = not data
+    if not stale:
+        try:
+            p = _mypl_cache_path()
+            f = xbmcvfs.File(p)
+            try:
+                raw = f.read()
+                if isinstance(raw, bytes):
+                    raw = raw.decode('utf-8', 'replace')
+                d = json.loads(raw)
+            finally:
+                f.close()
+            stale = not (isinstance(d, dict) and d.get('_ts') == _epg_today())
+        except Exception:
+            stale = True
+    if stale and fastcache is not None:
+        try:
+            if not fastcache.fresh('mypl:bg', 900):
+                fastcache.fset('mypl:bg', {'fp': _mypl_fp(url)})
+                fastcache.flush()
+                threading.Thread(target=_mypl_bg, args=(url,),
+                                 daemon=True).start()
+        except Exception:
+            pass
+    return data
+
+
+def _mypl_items_for(chan_data):
+    """[(url, libellé)] : chaînes de LA PLAYLIST DE L'UTILISATEUR dont le
+    nom correspond à une chaîne du match (clé exacte normalisée ; le match
+    ne fournit que des NOMS, les flux viennent de la playlist — rien
+    d'ajouté par nous). Zéro réseau bloquant : cache profil seulement."""
+    if not chan_data:
+        return []
+    chans = _mypl_ensure()
+    if not chans:
+        return []
+    names = []
+    for c in chan_data:
+        try:
+            if isinstance(c, dict):
+                nm = six.ensure_text(c.get('name') or u'', encoding='utf-8',
+                                     errors='replace').strip()
+            else:
+                raw = six.ensure_text(c, encoding='utf-8', errors='replace').strip()
+                row = _db_channel(raw)
+                nm = six.ensure_text(row.get('channelName') or u'',
+                                     encoding='utf-8', errors='replace').strip() if row else raw
+            if nm:
+                names.append(nm)
+        except Exception:
+            continue
+    out = []
+    seen = set()
+    for nm in names:
+        for key in (_mypl_norm_key(nm), _norm_txt(nm)):
+            ent = chans.get(key)
+            if not ent:
+                continue
+            if ent[1] not in seen:
+                seen.add(ent[1])
+                out.append((ent[1], u'Ma playlist : {0}'.format(ent[0])))
+            break
+    return out
+
+
+def _pl_payload(u):
+    """Payload de lecture d'un flux de la playlist — même convention que la
+    grille (quote(base64(...))) : décodé par play_mypl."""
+    return str(quote(base64.b64encode(six.ensure_binary(u, encoding='utf-8'))))
+
+
+def play_mypl(name, url):
+    """v3.7.28 (bêta) — lecture DIRECTE d'un flux de « Ma playlist ». Le
+    lien vient des réglages de L'UTILISATEUR (jamais du dépôt) et est déjà
+    un flux final (ts / m3u8) : aucun résolveur, aucun inputstream ajouté
+    (verrou), MIME correct pour un démarrage fiable."""
+    try:
+        stream_url = six.ensure_text(base64.b64decode(unquote(url)),
+                                     encoding='utf-8', errors='strict').strip()
+    except Exception:
+        raise Exception(u'Lien de la playlist illisible.')
+    if not stream_url.lower().startswith((u'http://', u'https://')):
+        raise Exception(u'Lien de la playlist invalide.')
+    liz = xbmcgui.ListItem(six.ensure_str(_plain(name), encoding='utf-8',
+                                          errors='replace'))
+    liz.setArt({'icon': ICON, 'thumb': ICON, 'poster': ICON, 'fanart': FANART})
+    liz.setInfo('video', {'title': _plain(name)})
+    liz.setProperty('IsPlayable', 'true')
+    liz.setContentLookup(False)
+    if u'.m3u8' in stream_url.lower():
+        liz.setMimeType('application/vnd.apple.mpegurl')
+    else:
+        liz.setMimeType('video/mp2t')
+    liz.setPath(stream_url)
+    xbmc.Player().play(stream_url, liz, False)
+
+
 def get_events(url):  # 5
     # v3.7.6/3.7.7 — menu toujours instantané : la liste des matchs vit sur
     # le disque du profil (fastcache, porté de la 3.7.4).
@@ -1069,6 +1362,13 @@ def get_events(url):  # 5
                                  daemon=True).start()
         except Exception:
             pass
+    # v3.7.28 (bêta) — « Ma playlist » : préparation en ARRIÈRE-PLAN dès
+    # l'ouverture de la liste (téléchargement éventuel de plusieurs Mo,
+    # jamais bloquant ; la fiche des matchs n'en profite qu'une fois prête).
+    try:
+        _mypl_ensure()
+    except Exception:
+        pass
     # v3.7.8 — tri par heure (comme avant) ou groupement par sport (réglage)
     if False:  # v3.7.20 — jamais de groupement par sport (réglage retiré des Paramètres)
         events = sorted(event_list, key=lambda x: (six.ensure_text(x[4], encoding='utf-8', errors='replace').lower(), x[1]))
@@ -1543,6 +1843,21 @@ def get_stream(name, url):  # 4
             sstreams = _borrow_links_from_grid(chan_data)
         except Exception:
             sstreams = []
+    # v3.7.28 (bêta) — « Ma playlist » : les chaînes de LA PLAYLIST DE
+    # L'UTILISATEUR (URL collée dans Paramètres > Expérimental (bêta), elle
+    # ne quitte JAMAIS cet appareil et n'apparaît nulle part dans le dépôt)
+    # dont le nom correspond à une chaîne du match s'ajoutent EN FIN de
+    # liste, libellées « Ma playlist : … » — lecture DIRECTE du flux
+    # (ts / m3u8), aucun résolveur, aucun inputstream ajouté (verrou).
+    pl_items = []
+    try:
+        pl_items = _mypl_items_for(chan_data)
+    except Exception:
+        pl_items = []
+    if pl_items:
+        _pl_seen = set(i[0] for i in sstreams)
+        pl_items = [(u, lbl) for u, lbl in pl_items if u not in _pl_seen]
+        sstreams = sstreams + pl_items
     if len(sstreams) < 1:
         if fr_only:
             control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]\n"
@@ -1559,9 +1874,22 @@ def get_stream(name, url):  # 4
             # v3.7.22 — chaque entrée porte le paquet complet des liens du
             # match ({"l": […], "i": rang cliqué}) : si le lien cliqué est
             # mort, la lecture bascule automatiquement sur le suivant.
-            links_all = [i[0] for i in sstreams]
+            # v3.7.28 (bêta) — les entrées « Ma playlist » (flux directs de
+            # l'utilisateur) sont HORS paquet de bascule auto (réservé aux
+            # liens du guide, qui restent prioritaires) et se jouent en
+            # DIRECT via play_mypl, sans résolveur.
+            _pl_urls = set(u for u, _lbl in pl_items)
+            links_all = [i[0] for i in sstreams if i[0] not in _pl_urls]
             for idx, i in enumerate(sstreams, 1):
                 title, link = i[1], i[0]
+                if link in _pl_urls:
+                    num = u'[COLOR dimgray]{0}.[/COLOR] '.format(idx)
+                    info = {'title': _plain(title), 'sorttitle': '',
+                            'plot': _plain(name)}
+                    addDir(num + u'[COLOR skyblue]' + title + u'[/COLOR]',
+                           _pl_payload(link), 'play_mypl', ICON, name,
+                           isFolder=False, infoLabels=info)
+                    continue
                 lbl = _link_label(link)
                 if lbl and 'vecdn' not in link and str(link) != str(title):
                     title = u'{0} [COLOR dimgray]· {1}[/COLOR]'.format(title, lbl)
@@ -1573,14 +1901,18 @@ def get_stream(name, url):  # 4
             # v3.7.22/3.7.23 — pré-résolution en ARRIÈRE-PLAN : du dernier
             # lien qui a marché pour ce match s'il est connu (re-clic
             # instantané), sinon du premier lien affiché. Le flux est prêt
-            # (cache 10 min) avant même le clic.
-            _prewarm_link(name, _last_good_link(links_all) or links_all[0])
+            # (cache 10 min) avant même le clic. (v3.7.28 : liens du guide
+            # seulement — un flux « Ma playlist » n'a rien à résoudre.)
+            if links_all:
+                _prewarm_link(name, _last_good_link(links_all) or links_all[0])
             xbmcplugin.setContent(_handle, 'videos')
             xbmcplugin.endOfDirectory(_handle)
 
         else:
-            link = sstreams[0][0]
-            resolve2(name, link)
+            if sstreams[0][0] in set(u for u, _lbl in pl_items):
+                play_mypl(name, _pl_payload(sstreams[0][0]))
+            else:
+                resolve2(name, sstreams[0][0])
 
 
 def xbmc_curl_encode(url, headers):
@@ -2508,7 +2840,7 @@ def addDir(name, url, mode, iconimage, description, isFolder=True, infoLabels=No
         except Exception:
             pass
     if not isFolder:
-        if mode == 'settings' or mode == 'version' or mode == 'clear' or mode == 'play_stream' or mode == 'site_play':
+        if mode == 'settings' or mode == 'version' or mode == 'clear' or mode == 'play_stream' or mode == 'site_play' or mode == 'play_mypl':
             isFolder = False
         else:
             liz.setProperty('IsPlayable', 'true')
@@ -2719,6 +3051,9 @@ def router(paramstring):
             get_stream(params['name'], params['url'])
         elif params['mode'] == 'play_stream':
             resolve2(params['description'], params['url'])
+        elif params['mode'] == 'play_mypl':
+            # v3.7.28 (bêta) — lecture directe d'un flux de « Ma playlist »
+            play_mypl(params['description'], params['url'])
         elif params['mode'] == 'settings':
             Open_settings()
         elif params['mode'] == 'refresh_events':
@@ -2735,6 +3070,15 @@ def router(paramstring):
                     _os.remove(_fc)
                 if fastcache is not None:
                     fastcache._items = None   # sera rechargé au prochain accès
+            except Exception:
+                pass
+            # v3.7.28 — cache « Ma playlist » (chaînes de la playlist de
+            # l'utilisateur ; le réglage URL lui-même reste dans Kodi)
+            try:
+                import os as _os
+                _mp = _os.path.join(ADDON_DATA, 'mypl.json')
+                if _os.path.exists(_mp):
+                    _os.remove(_mp)
             except Exception:
                 pass
             # v3.7.26 — dossier logos/ des anciennes versions (≤ 3.7.25)
