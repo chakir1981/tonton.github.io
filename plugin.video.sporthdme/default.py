@@ -3037,6 +3037,68 @@ def site_play(payload):
     xbmc.Player().play(stream_url, liz, False)
 
 
+# v3.7.29 — TAMPHON VIDÉO ANTI-SACCADÉS (option « Réglages »).
+# Les soirs de gros matchs, le CDN d'une source peut ralentir : la vidéo se
+# met à tourner au ralenti (« ça ram ») puis la lecture échoue (« Échec de
+# lecture »). Kodi sait absorber ces à-coups en gardant D'AVANCE plus de
+# vidéo en mémoire vive : c'est le rôle du fichier advancedsettings.xml de
+# son profil (buffermode 1 = tous les types de flux, memorysize 100 Mo,
+# readfactor 3 = lire sur le réseau plus vite que la lecture). L'option
+# ÉCRIT ce fichier uniquement s'il n'existe pas encore — on n'écrase JAMAIS
+# un advancedsettings.xml existant (fichier de l'utilisateur) ; à la
+# désactivation, seul le fichier portant NOTRE marqueur est retiré. Kodi ne
+# lit ce fichier qu'au démarrage : une notification rappelle de redémarrer.
+_ADV_MARKER = '<!-- sporthd buffer_boost v1 -->'
+_ADV_FILE = 'special://masterprofile/advancedsettings.xml'
+_ADV_XML = (
+    '<?xml version="1.0" encoding="utf-8"?>\n'
+    + _ADV_MARKER + '\n'
+    '<advancedsettings>\n'
+    '  <cache>\n'
+    '    <buffermode>1</buffermode>\n'
+    '    <memorysize>104857600</memorysize>\n'
+    '    <readfactor>3.0</readfactor>\n'
+    '  </cache>\n'
+    '</advancedsettings>\n')
+
+
+def _buffer_boost_on():
+    return ADDON.getSetting('buffer_boost') == 'true'
+
+
+def _buffer_boost_sync():
+    """v3.7.29 — applique/retire le tampon vidéo selon le réglage, à chaque
+    ouverture de l'add-on. Silencieux quand l'état est déjà conforme ; ne
+    touche jamais à un advancedsettings.xml qui n'est pas de nous."""
+    try:
+        ours = False
+        if xbmcvfs.exists(_ADV_FILE):
+            f = xbmcvfs.File(_ADV_FILE)
+            try:
+                head = f.read(220)
+            finally:
+                f.close()
+            if isinstance(head, bytes):
+                head = head.decode('utf-8', 'replace')
+            ours = _ADV_MARKER in (head or '')
+        if _buffer_boost_on():
+            if xbmcvfs.exists(_ADV_FILE):
+                # présent : soit le nôtre (déjà fait), soit celui de
+                # l'utilisateur (on ne touche pas) — silence dans les deux cas
+                return
+            f = xbmcvfs.File(_ADV_FILE, 'w')
+            f.write(six.ensure_binary(_ADV_XML, encoding='utf-8'))
+            f.close()
+            control.infoDialog(u"[COLOR skyblue]Tampon vidéo activé — redémarre Kodi pour l'appliquer[/COLOR]",
+                               NAME, ICON, 6000)
+        elif ours:
+            xbmcvfs.deleteFile(_ADV_FILE)
+            control.infoDialog(u'[COLOR grey]Tampon vidéo désactivé — redémarre Kodi[/COLOR]',
+                               NAME, ICON, 4000)
+    except Exception as e:
+        log_error('buffer_boost: {0}'.format(e))
+
+
 def router(paramstring):
     params = dict(parse_qsl(paramstring))
     if params:
@@ -3109,6 +3171,9 @@ def router(paramstring):
         elif params['mode'] == 'site_play':
             site_play(params['url'])
     else:
+        # v3.7.29 — synchronise le tampon vidéo (advancedsettings.xml) à
+        # chaque ouverture de l'add-on, puis affiche le menu
+        _buffer_boost_sync()
         Main_menu()
 
 

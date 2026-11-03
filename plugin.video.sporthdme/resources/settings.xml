@@ -4,6 +4,7 @@
         <setting id="french_only" type="bool" label="Uniquement les sources françaises (masque les matchs sans chaîne FR)" default="true" />
         <setting id="hide_finished" type="bool" label="Masquer les matchs terminés (liste resserrée : en direct + à venir)" default="true" />
         <setting id="auto_next" type="bool" label="Si un lien ne répond pas, essayer automatiquement le suivant" default="true" />
+        <setting id="buffer_boost" type="bool" label="Tampon vidéo anti-saccades (100 Mo en RAM ; pris en compte au redémarrage de Kodi)" default="false" />
         <setting id="timezone" label="Choisir le fuseau horaire" type="select" values="-12|-11|-10|-9|-8|-7|-6|-5|-4|-3|-2|-1|0|+1|+2|+3|+4|+5|+6|+7|+8|+9|+10|+11|+12" default="+3" sort="yes" />
     </category>
     <category label="Expérimental (bêta)">
