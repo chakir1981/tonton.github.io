@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.22" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.23" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -16,6 +16,12 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
+      [B]v3.7.23[/B] 03/11/2026
+- PASTILLE « DANS X MIN » : les matchs qui commencent dans moins de 15 minutes affichent « · dans 12 min » juste après l'heure — impossible de rater un coup d'envoi (information déjà dans la grille : zéro requête de plus).
+- LOGOS D'ÉQUIPES DANS LA LISTE DES MATCHS : chaque match porte l'écusson de son équipe (équipe 1, sinon équipe 2). Source ESPN (1 requête par compétition : Ligue des champions, Ligue 1, Premier League, LaLiga, NHL, NBA…, gardée 30 jours sur le disque) complétée en arrière-plan par TheSportsDB pour les autres compétitions (leur limite stricte est respectée : 1 requête toutes les 2,5 s). Les noms sont rapprochés intelligemment (accents, « München » = « Munich », « PSG » = « Paris Saint-Germain ») et les faux amis e-sport sont refusés. Nouveau réglage « Afficher les logos des équipes » (ACTIVÉ par défaut) dans Paramètres > Réglages — désactivez-le si vous préférez l'icône unique.
+- MÉMOIRE DU LIEN QUI A MARCHÉ : quand une lecture réussit, le lien gagnant est retenu 2 jours pour CE match ; à la prochaine lecture, il est essayé en premier et c'est LUI qui se pré-résout en arrière-plan (3.7.22) — on ne retombe plus sur un lien déjà mort, le re-clic est encore plus souvent instantané.
+- Les numéros annoncés par la bascule automatique reprennent fidèlement la numérotation affichée (1. 2. 3.).
+- Rien d'autre ne change : mêmes matchs, mêmes liens d'origine du guide, toujours SANS aucun lien ajouté, verrous 3.7.20/3.7.21 intacts (langues FR au titre, pas de groupement par sport, pas de menu chaînes FR).
       [B]v3.7.22[/B] 03/11/2026
 - OUVERTURE DES VIDÉOS BIEN PLUS RAPIDE : dès l'affichage de la liste des liens d'un match, le premier flux se résout EN ARRIÈRE-PLAN — au clic, il est déjà prêt (gain typique : 2 à 4 s, jusqu'à 8 s quand le premier miroir traîne).
 - MÉMOIRE DU FLUX RÉSOLU (3 min) : un 2e clic sur le même lien (mauvais miroir, reprise après coupure) redémarre sans nouvelle résolution — avant, tout était recalculé à chaque fois.

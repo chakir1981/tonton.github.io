@@ -2,6 +2,8 @@
 from __future__ import print_function
 import xbmcvfs
 import base64
+import hashlib
+import unicodedata
 import re
 import sys
 import six
@@ -199,6 +201,320 @@ def _refresh_matches_bg(url):
         pass
 
 
+# ---------------------------------------------------------------------------
+# v3.7.23 — LOGOS D'ÉQUIPES dans la liste des matchs. Deux sources,
+# ZÉRO flux vidéo ajouté (aucun lien de lecture n'est modifié) :
+#   1) ESPN (API publique) : UNE requête par compétition renvoie toutes les
+#      équipes et leurs logos (cache disque 30 j) — rapide, sans limite
+#      pratique ; réservé aux compétitions mappées ci-dessous, avec un
+#      budget de temps par affichage pour ne jamais ralentir la liste ;
+#   2) TheSportsDB (clé de test publique 123) en FILE D'ARRIÈRE-PLAN
+#      (1 requête / 2,5 s, leur limite stricte) pour les équipes hors
+#      compétitions mappées — le logo apparaît à la liste suivante.
+# Les noms du guide (type Flashscore : « Bayern München », « Bodø / Glimt »,
+# « PSG ») sont normalisés (minuscules, sans accents, sans ponctuation) et
+# rapprochés par : égalité, mots proches (préfixe), alias connus, ou sigle
+# (« PSG » = initiales de « Paris Saint-Germain »).
+# ---------------------------------------------------------------------------
+ESPN_LEAGUES = [
+    (u'uefa champions league', 'soccer/uefa.champions'),
+    (u'uefa europa conference', 'soccer/uefa.europa.conf'),
+    (u'uefa europa league', 'soccer/uefa.europa'),
+    (u'england premier league', 'soccer/eng.1'),
+    (u'england championship', 'soccer/eng.2'),
+    (u'france ligue 1', 'soccer/fra.1'),
+    (u'france ligue 2', 'soccer/fra.2'),
+    (u'spain laliga 2', 'soccer/esp.2'),
+    (u'spain laliga', 'soccer/esp.1'),
+    (u'spain copa del rey', 'soccer/esp.copa_del_rey'),
+    (u'italy serie a', 'soccer/ita.1'),
+    (u'italy serie b', 'soccer/ita.2'),
+    (u'germany bundesliga', 'soccer/ger.1'),
+    (u'netherlands eredivisie', 'soccer/ned.1'),
+    (u'portugal primeira liga', 'soccer/por.1'),
+    (u'sweden allsvenskan', 'soccer/swe.1'),
+    (u'belgium pro league', 'soccer/bel.1'),
+    (u'saudi arabia pro league', 'soccer/ksa.1'),
+    (u'turkey super lig', 'soccer/tur.1'),
+    (u'scotland premiership', 'soccer/sco.1'),
+    (u'nhl', 'hockey/nhl'),
+    (u'nba', 'basketball/nba'),
+    (u'euroleague', 'basketball/euroleague'),
+]
+# variantes d'orthographe du guide vs bases de logos
+_ALIAS = {u'munchen': u'munich', u'koln': u'cologne'}
+# sport du guide -> strSport TheSportsDB (filtre anti faux amis : « PSG »
+# renvoie d'abord « PSG Talon », une équipe e-sport)
+_TSDB_SPORT = {u'football': 'Soccer', u'basketball': 'Basketball',
+               u'hockey': 'Ice Hockey', u'american football': 'American Football',
+               u'baseball': 'Baseball', u'rugby': 'Rugby', u'tennis': 'Tennis'}
+_ROSTER_TTL = 30 * 86400    # compétitions / logos : ça change rarement
+_LOGO_NEG_TTL = 7 * 86400   # équipe introuvable : on retentera dans 7 j
+_LOGO_QUEUE = []            # [(norm, nom, sport)] à résoudre en arrière-plan
+_LOGO_LOCK = threading.Lock()
+_LOGO_THREAD_ALIVE = []
+_LOGO_INLINE_BUDGET = [0.0]  # secondes ESPN dépensées pour cet affichage
+_CHARMAP = {u'ø': u'o', u'æ': u'ae', u'å': u'a', u'đ': u'd', u'ł': u'l',
+            u'ß': u'ss', u'ı': u'i', u'ð': u'd', u'þ': u'th'}
+
+
+def _team_logos_setting():
+    """Réglage « Afficher les logos des équipes » (activé par défaut)."""
+    try:
+        return (ADDON.getSetting('team_logos') or 'true').strip().lower() == 'true'
+    except Exception:
+        return True
+
+
+def _norm_name(s):
+    """Minuscules, sans accents (München -> munchen), sans ponctuation
+    (Bodø / Glimt -> bodo glimt)."""
+    try:
+        s = six.ensure_text(s, encoding='utf-8', errors='replace').lower()
+    except Exception:
+        s = u''
+    s = u''.join(_CHARMAP.get(ch, ch) for ch in s)
+    try:
+        s = unicodedata.normalize('NFKD', s)
+        s = u''.join(ch for ch in s if not unicodedata.combining(ch))
+    except Exception:
+        pass
+    s = re.sub(r'[^a-z0-9 ]+', u' ', s)
+    return re.sub(r' +', u' ', s).strip()
+
+
+def _tok_eq(a, b):
+    """2 = mot identique, 1 = proche (préfixe / alias), 0 = différent."""
+    if a == b:
+        return 2
+    if len(a) >= 4 and len(b) >= 4 and (a.startswith(b) or b.startswith(a)):
+        return 1
+    if _ALIAS.get(a) == b or _ALIAS.get(b) == a:
+        return 1
+    return 0
+
+
+def _names_match(a, b):
+    """Le nom du guide a-t-il un équivalent dans la base de logos ?
+    Score : 4 = égalité, 3 = mêmes mots / inclusion exacte, 2 = mots proches
+    ou sigle, 0 = non."""
+    na, nb = _norm_name(a), _norm_name(b)
+    if not na or not nb:
+        return 0
+    if na == nb:
+        return 4
+    ta, tb = na.split(), nb.split()
+    sa, sb = set(ta), set(tb)
+    if sa == sb:
+        return 3
+    # sigle : « psg » = initiales (dans l'ordre) de « paris saint germain »
+    if len(ta) == 1 and len(tb) >= 3 and u''.join(w[0] for w in tb) == ta[0]:
+        return 2
+    if len(tb) == 1 and len(ta) >= 3 and u''.join(w[0] for w in ta) == tb[0]:
+        return 2
+    small, big = (sa, sb) if len(sa) <= len(sb) else (sb, sa)
+    matched, exact = 0, 0
+    for t in small:
+        best = 0
+        for u2 in big:
+            e = _tok_eq(t, u2)
+            if e > best:
+                best = e
+        if best == 0:
+            return 0            # un mot sans équivalent -> pas un match
+        matched += 1
+        if best == 2:
+            exact += 1
+    if matched == len(small):
+        if len(sa) == 1 and len(sb) > 1 and exact:
+            return 3            # « Roma » dans « as roma »
+        return 2                # « internazionale » ~ « inter milan »
+    return 0
+
+
+def _espn_slug_for_league(lname):
+    if not lname:
+        return None
+    nl = _norm_name(lname)
+    for key, slug in ESPN_LEAGUES:      # key déjà normalisée ; les plus
+        if key in nl:                   # spécifiques d'abord
+            return slug
+    return None
+
+
+def _espn_roster(slug):
+    """{nom_normalisé: (nom affiché, url_logo)} pour une compétition ESPN
+    (cache disque 30 j). None si indisponible."""
+    if fastcache is None:
+        cache = None
+    else:
+        try:
+            cache = fastcache.fget('espnroster:' + slug, _ROSTER_TTL)
+        except Exception:
+            cache = None
+    if cache:
+        return cache
+    try:
+        r = requests.get(
+            'https://site.api.espn.com/apis/site/v2/sports/{0}/teams'.format(slug),
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                                   'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'},
+            timeout=6)
+        data = r.json()
+        teams = (data.get('sports') or [{}])[0].get('leagues', [{}])[0].get('teams') or []
+    except Exception:
+        return None
+    out = {}
+    for t in teams:
+        t = (t or {}).get('team') or {}
+        nm = t.get('displayName')
+        logos = t.get('logos') or []
+        if not nm or not logos:
+            continue
+        href = logos[0].get('href') or ''
+        if href:
+            out[_norm_name(nm)] = (nm, href)
+    if fastcache is not None and out:
+        try:
+            fastcache.fset('espnroster:' + slug, out)
+            fastcache.flush()
+        except Exception:
+            pass
+    return out or None
+
+
+def _logo_store(nt, url):
+    """Mémoire du logo (url, ou '@none' = introuvable, négatif 7 j)."""
+    if fastcache is None:
+        return
+    try:
+        fastcache.fset('logo:' + nt, url or u'@none')
+        fastcache.flush()
+    except Exception:
+        pass
+
+
+def _tsdb_lookup(nt, team, sport):
+    """TheSportsDB en arrière-plan : recherche d'équipe filtrée par sport
+    (refuse les faux amis e-sport), nom rapproché par _names_match.
+    Réseau indisponible -> réessai plus tard (pas de négatif)."""
+    if fastcache is not None:
+        try:
+            hit = fastcache.fget('logo:' + nt, _ROSTER_TTL)
+            if hit is not None:
+                return
+        except Exception:
+            pass
+    want = _TSDB_SPORT.get(_norm_name(sport)) if sport else None
+    try:
+        r = requests.get(
+            'https://www.thesportsdb.com/api/v1/json/123/searchteams.php?t={0}'.format(
+                quote(team)),
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                                   'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'},
+            timeout=8)
+        teams = (r.json() or {}).get('teams') or []
+    except Exception:
+        return
+    pick = None
+    for t in teams:
+        if want and (t.get('strSport') or '') != want:
+            continue
+        if _names_match(team, t.get('strTeam') or '') >= 2:
+            pick = t
+            break
+    if not pick:
+        for t in teams:
+            if want and (t.get('strSport') or '') != want:
+                continue
+            if _names_match(team, t.get('strTeam') or '') >= 1:
+                pick = t
+                break
+    if pick and pick.get('strBadge'):
+        _logo_store(nt, pick['strBadge'])
+    elif teams:
+        _logo_store(nt, u'@none')       # cherché et pas trouvé -> négatif
+
+
+def _logo_queue_add(team, sport):
+    nt = _norm_name(team)
+    if not nt:
+        return
+    with _LOGO_LOCK:
+        if nt not in [x[0] for x in _LOGO_QUEUE]:
+            _LOGO_QUEUE.append((nt, team, sport or u''))
+        alive = bool(_LOGO_THREAD_ALIVE)
+    if not alive:
+        _logo_thread_start()
+
+
+def _logo_thread_start():
+    with _LOGO_LOCK:
+        if _LOGO_THREAD_ALIVE:
+            return
+        _LOGO_THREAD_ALIVE.append(True)
+
+    def _run():
+        try:
+            while True:
+                with _LOGO_LOCK:
+                    if not _LOGO_QUEUE:
+                        break
+                    nt, team, sport = _LOGO_QUEUE.pop(0)
+                _tsdb_lookup(nt, team, sport)
+                time.sleep(2.5)         # limite TheSportsDB (test key)
+        except Exception:
+            pass
+        finally:
+            with _LOGO_LOCK:
+                if _LOGO_THREAD_ALIVE:
+                    _LOGO_THREAD_ALIVE.pop()
+
+    try:
+        t = threading.Thread(target=_run)
+        t.daemon = True
+        t.start()
+    except Exception:
+        with _LOGO_LOCK:
+            if _LOGO_THREAD_ALIVE:
+                _LOGO_THREAD_ALIVE.pop()
+
+
+def _team_logo(team, league=None, sport=None):
+    """URL du logo d'une équipe, ou '' (icône de base conservée).
+    Cache 30 j (négatif 7 j). Hors cache : compétition mappée ESPN
+    (requête directe, budget de temps par affichage) sinon file
+    d'attente TheSportsDB en ARRIÈRE-PLAN — jamais dans le fil d'affichage."""
+    if not team or not _team_logos_setting():
+        return ''
+    nt = _norm_name(team)
+    if not nt:
+        return ''
+    if fastcache is not None:
+        try:
+            hit = fastcache.fget('logo:' + nt, _ROSTER_TTL)
+            if hit is not None:
+                return '' if hit == u'@none' else hit
+        except Exception:
+            pass
+    slug = _espn_slug_for_league(league)
+    if slug and _LOGO_INLINE_BUDGET[0] < 2.5:
+        t0 = time.time()
+        roster = _espn_roster(slug)
+        _LOGO_INLINE_BUDGET[0] += time.time() - t0
+        if roster:
+            best, best_s = None, 0
+            for _rn, (_disp, href) in roster.items():
+                sc = _names_match(team, _rn)
+                if sc > best_s:
+                    best, best_s = href, sc
+            if best:
+                _logo_store(nt, best)
+                return best
+    _logo_queue_add(team, sport)
+    return ''
+
+
 def get_events(url):  # 5
     # v3.7.6/3.7.7 — menu toujours instantané : la liste des matchs vit sur
     # le disque du profil (fastcache, porté de la 3.7.4).
@@ -293,6 +609,15 @@ def get_events(url):  # 5
         else:
             m_color = 'gold'
             state = u''
+            # v3.7.23 — pastille « dans X min » sur les coups d'envoi
+            # imminents (donnée déjà dans la grille : aucune requête)
+            try:
+                _mins = int(round((compare - now_time_in_ms) / 60000.0))
+                if 0 <= _mins <= 15:
+                    state = u' [COLOR skyblue]· dans {0} min[/COLOR]'.format(
+                        _mins if _mins >= 1 else 1)
+            except Exception:
+                pass
         # v3.7.11 — titre épuré : heure, équipes, langues. La compétition
         # (« France. Ligue 1 »…) SORT de la ligne du match (elle reste dans
         # la fiche ci-dessous, panneau d'informations du skin).
@@ -332,7 +657,8 @@ def get_events(url):  # 5
             plot.append(u'Chaînes : ' + u', '.join(chan_names))
         info = {'title': _plain(event), 'plot': u'\n'.join(plot),
                 'genre': six.ensure_text(sport, encoding='utf-8', errors='replace') or u'Sport'}
-        event_list.append([name, compare, channels, icon, sport, info])
+        event_list.append([name, compare, channels, icon, sport, info,
+                           team1, team2, lname])
 
         # streams = str(quote(base64.b64encode(six.ensure_binary(str(streams)))))
     if not event_list:
@@ -351,10 +677,21 @@ def get_events(url):  # 5
         events = sorted(event_list, key=lambda x: x[1])
     ctx_refresh = [(u'Actualiser la grille',
                     'RunPlugin({0}?mode=refresh_events)'.format(_url))]
+    _LOGO_INLINE_BUDGET[0] = 0.0    # v3.7.23 — budget ESPN de CET affichage
     for event in deduplicate_events(events):
         streams = str(quote(base64.b64encode(six.ensure_binary(str(event[2])))))
         name = event[0]
         icon = event[3]
+        # v3.7.23 — logo de l'équipe 1, sinon de l'équipe 2, sinon icône de
+        # base (ou team1Img de la source si un jour elle revient) ; jamais de
+        # requête bloquante hors compétitions ESPN mappées (budget 2,5 s).
+        try:
+            _logo = _team_logo(event[6], event[8], event[4]) \
+                or _team_logo(event[7], event[8], event[4])
+            if _logo:
+                icon = _logo
+        except Exception:
+            pass
         addDir(name, streams, 'get_streams', icon, FANART, isFolder=True,
                infoLabels=event[5], context=ctx_refresh)
 
@@ -719,9 +1056,11 @@ def get_stream(name, url):  # 4
                 addDir(num + title, json.dumps({'l': links_all, 'i': idx - 1}),
                        'play_stream', ICON, name,
                        isFolder=False, infoLabels=info)
-            # v3.7.22 — pré-résolution du premier lien en ARRIÈRE-PLAN : le
-            # flux est prêt (cache 3 min) avant même le clic.
-            _prewarm_link(name, links_all[0])
+            # v3.7.22/3.7.23 — pré-résolution en ARRIÈRE-PLAN : du dernier
+            # lien qui a marché pour ce match s'il est connu (re-clic
+            # instantané), sinon du premier lien affiché. Le flux est prêt
+            # (cache 3 min) avant même le clic.
+            _prewarm_link(name, _last_good_link(links_all) or links_all[0])
             xbmcplugin.setContent(_handle, 'videos')
             xbmcplugin.endOfDirectory(_handle)
 
@@ -1234,6 +1573,71 @@ def _parse_play_payload(url):
     return [url], 0
 
 
+# v3.7.23 — MÉMOIRE DU DERNIER LIEN GAGNANT par match : quand une lecture
+# réussit, le lien qui a marché est retenu (2 jours) ; à la prochaine
+# lecture du même match, il est essayé en premier (après le lien cliqué)
+# et c'est LUI que le préchauffage 3.7.22 résout en arrière-plan — on ne
+# retombe plus sur un lien déjà mort.
+_GOOD_TTL = 2 * 86400
+
+
+def _links_key(links):
+    """Clé stable d'un paquet de liens (indépendante de l'ordre affiché)."""
+    try:
+        joined = u'|'.join(sorted(
+            six.ensure_text(x, encoding='utf-8', errors='replace') for x in links))
+        return hashlib.md5(joined.encode('utf-8')).hexdigest()
+    except Exception:
+        return None
+
+
+def _remember_good_link(links, link):
+    if fastcache is None or not link:
+        return
+    ck = _links_key(links)
+    if not ck:
+        return
+    try:
+        fastcache.fset('good:' + ck, link)
+        fastcache.flush()
+    except Exception:
+        pass
+
+
+def _last_good_link(links):
+    """Dernier lien qui a marché pour CE match, s'il est encore dans la
+    liste affichée (sinon None)."""
+    if fastcache is None:
+        return None
+    ck = _links_key(links)
+    if not ck:
+        return None
+    try:
+        good = fastcache.fget('good:' + ck, _GOOD_TTL)
+    except Exception:
+        return None
+    if good and good in links:
+        return good
+    return None
+
+
+def _play_order(links, idx, auto_next):
+    """Ordre d'essai des liens : le lien cliqué d'abord, puis (si la
+    bascule automatique 3.7.22 est active) le dernier lien qui a marché
+    pour ce match, puis les autres dans l'ordre affiché."""
+    order = [idx]
+    if auto_next and len(links) > 1:
+        good = _last_good_link(links)
+        if good and good in links:
+            gi = list(links).index(good)
+            if gi not in order:
+                order.append(gi)
+        for j in range(len(links)):
+            if j not in order:
+                order.append(j)
+    return order
+
+
 def _resolve2_cached(name, link, quiet=False):
     """Résolution avec cache « res: » (3 min). Les en-têtes étant inclus
     dans l'URL finale (convention Kodi « url|Referer=… »), le flux en cache
@@ -1305,15 +1709,21 @@ def resolve2(name, url):
     if not stream_url:
         xbmc.executebuiltin('ActivateWindow(busydialognocancel)')
         try:
-            j = idx
+            # v3.7.23 — ordre d'essai : lien cliqué, puis dernier lien qui a
+            # marché pour ce match (mémoire 2 j), puis les autres ; les
+            # messages reprennent les numéros AFFICHÉS (1. 2. 3.).
+            order = _play_order(links, idx, auto_next)
+            pos = 0
             tries = 0
-            while j < len(links):
+            while pos < len(order):
+                j = order[pos]
                 tries += 1
                 if tries > 1:
                     try:
                         Dialog.notification(
                             NAME,
-                            u"[COLOR skyblue]Lien {0} inaccessible — essai du lien {1}…[/COLOR]".format(j, j + 1),
+                            u"[COLOR skyblue]Lien {0} inaccessible — essai du lien {1}…[/COLOR]".format(
+                                order[pos - 1] + 1, j + 1),
                             ICON, 3000, False)
                     except Exception:
                         pass
@@ -1323,9 +1733,10 @@ def resolve2(name, url):
                     log_info('resolve link {0}/{1}: {2!r}'.format(j + 1, len(links), e))
                     stream_url = ''
                 if stream_url:
+                    _remember_good_link(links, links[j])
                     break
-                j += 1
-                if not auto_next or tries >= 3 or j >= len(links):
+                pos += 1
+                if not auto_next or tries >= 3 or pos >= len(order):
                     break
         finally:
             xbmc.executebuiltin('Dialog.Close(busydialognocancel)')
