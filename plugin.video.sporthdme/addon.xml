@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.24" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.25" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -16,6 +16,10 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
+      [B]v3.7.25[/B] 03/11/2026
+- MOINS DE MATCHS « VIDES » (rattachement de secours par chaîne) : quand la grille affiche un match avec ses chaînes mais que le guide n'y a mis AUCUN lien, l'add-on reprend les liens de CES MÊMES chaînes tels que la grille les porte sur les autres matchs (vérifié : le même canal porte toujours les mêmes liens sur toute la grille — 54 canaux contrôlés, 0 divergence). Zéro requête de plus (la grille est déjà sur le disque) et AUCUN lien ajouté : on ne fait que ré-attacher ce que le guide lui-même a déjà associé à ces chaînes. Le filtre « Uniquement les sources françaises » reste respecté.
+- PLUS JAMAIS DE GRILLE VIDE SI LE GUIDE CHANGE (mode dégradé « rapprochement par titre ») : si le site du guide modifie sa structure (les deux lectures normales échouent), l'add-on relit les mêmes données de façon permissive et RECONSTRUIT lui-même les paires match ↔ chaînes (équipes, heure, langues) au lieu d'afficher « Aucun match programmé ». Tout ce qui est affiché vient du guide — rien d'extérieur, rien d'ajouté.
+- Rien d'autre ne change : mêmes matchs, mêmes liens d'origine du guide, logos locaux (3.7.24), pastille « dans X min » et mémoire du lien (3.7.23) intactes, verrous 3.7.20/3.7.21 conservés, toujours SANS aucun lien ajouté.
       [B]v3.7.24[/B] 03/11/2026
 - CORRECTION : LES LOGOS NE S'AFFICHAIENT PAS (sur certains Kodi, Android notamment) — les écussons étaient fournis à Kodi sous forme d'adresse internet (https://a.espncdn.com/…), et le téléchargement silencieux des icônes distantes échoue sans message sur certains appareils. Désormais chaque logo est TÉLÉCHARGÉ UNE FOIS dans le profil de l'add-on (cache 30 jours) et la liste reçoit un CHEMIN LOCAL, qui s'affiche toujours, quel que soit l'appareil ou le skin.
 - PREMIÈRE FOIS : les logos se remplissent en arrière-plan (~15 s pour toute la grille) — ils apparaissent quand vous rouvrez la liste ; ensuite ils sont instantanés depuis le disque. Si un logo n'est pas trouvé, l'icône de base revient comme avant ; réglage « Afficher les logos des équipes » inchangé (Paramètres > Réglages). « Vider les données » supprime aussi les logos. Repli : si le stockage local échoue, l'URL distante est conservée (comportement 3.7.23).

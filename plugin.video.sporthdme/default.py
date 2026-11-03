@@ -153,7 +153,12 @@ def _matches_from_page(url):
 def _fetch_matches(url):
     """v3.7.7 — télécharge la liste des matchs (page du guide, puis repli
     JSON tvsport.guide) et l'écrit dans le cache disque (2 min). Retourne la
-    liste ou None ; toute panne réseau est silencieuse."""
+    liste ou None ; toute panne réseau est silencieuse.
+    v3.7.25 (B) — 3e étage : si les DEUX lectures strictes échouent (le guide
+    a changé sa structure), mode dégradé « rapprochement par titre » : les
+    mêmes données sont relues de façon permissive et les paires match ↔
+    chaînes sont reconstruites — au lieu d'afficher « Aucun match
+    programmé »."""
     matches = None
     if url != Live_fallback_url:
         try:
@@ -167,10 +172,310 @@ def _fetch_matches(url):
                                    timeout=12).json().get('matches')
         except Exception as e:
             log_info('events fallback {0} failed: {1!r}'.format(Live_fallback_url, e))
+    if not matches:
+        # v3.7.25 (B) — mode dégradé « rapprochement par titre » : lecture
+        # permissive des MÊMES sources (page + repli JSON), reconstruction
+        # des matchs au schéma du plugin. Aucune source ni aucun lien
+        # ajoutés : seuls les contenus déjà servis par le guide sont
+        # re-associés (équipes + heure + chaînes).
+        try:
+            matches = _matches_degraded(url)
+            if matches:
+                log_info('events degraded OK: {0} matchs reconstruits'.format(len(matches)))
+        except Exception as e:
+            log_info('events degraded {0} failed: {1!r}'.format(url, e))
     if matches and fastcache is not None:
         fastcache.fset('ev:' + url, matches)
         fastcache.flush()
     return matches
+
+
+# ---------------------------------------------------------------------------
+# v3.7.25 (B) — MODE DÉGRADÉ « rapprochement par titre ». Principe hérité des
+# addons « Find My Game » appliqué EN INTERNE : si le guide change de
+# structure, équipes + heure + chaînes suffisent à reformer la grille.
+# Repères mesurés sur la grille réelle (03/11/2026) : heure affichée = UTC+2
+# (114/114 matchs), « channel » = « <chaîne> <code pays> », links et
+# oldLinks portés par chaque canal.
+# ---------------------------------------------------------------------------
+_GUIDE_TZ_OFFSET_MIN = 120      # heure affichée du guide = UTC + 2
+
+
+def _strip_lang_suffix(name):
+    """« TNT Sports 1 GB » -> « TNT Sports 1 » : retire le(s) code(s) pays
+    collés en fin du champ `channel` du guide (2-3 lettres majuscules après
+    un espace, au plus deux codes). Sans effet sur « Canal+ Foot » etc."""
+    s = six.ensure_text(name or u'', encoding='utf-8', errors='replace').strip()
+    for _ in range(2):
+        s2 = re.sub(r'\s+[A-Z]{2,3}$', '', s)
+        if s2 == s:
+            break
+        s = s2
+    return s.strip()
+
+
+def _degraded_time_ms(m):
+    """Horodatage (ms) le plus fiable d'un match « brut » :
+    1) startTimestamp (secondes OU millisecondes, fenêtre de plausibilité
+       1973-2100 — un timestamp absurde ne doit jamais masquer le match) ;
+    2) matchDate (« 2026-11-03 ») + time (« 22:00 ») à UTC+2 (décalage
+       mesuré du guide : 114/114 matchs) ;
+    3) sinon 999999999999 (queue de liste, comme la voie stricte — un
+       horaire inconnu ne doit JAMAIS être interprété comme « terminé »,
+       sinon le match disparaît avec « Masquer les matchs terminés »)."""
+    try:
+        v = float(m.get('startTimestamp') or 0)
+        if v > 1e11:                        # déjà en millisecondes
+            v = v / 1000.0
+        if 1e8 <= v <= 4.1e9:               # 1973..2100 : plausible
+            return int(v * 1000)
+    except Exception:
+        pass
+    md = six.ensure_text(m.get('matchDate') or '', encoding='utf-8', errors='replace').strip()
+    hh = six.ensure_text(m.get('time') or m.get('livetvtimestr') or '',
+                         encoding='utf-8', errors='replace').strip()
+    if (re.match(r'^\d{4}-\d{2}-\d{2}$', md) and re.match(r'^\d{1,2}:\d{2}', hh)):
+        try:
+            hhmm = hh.split(' ')[0].split(':')
+            dt = datetime(int(md[0:4]), int(md[5:7]), int(md[8:10]),
+                          int(hhmm[0]), int(hhmm[1]))
+            dt = dt - timedelta(minutes=_GUIDE_TZ_OFFSET_MIN)   # -> UTC
+            epoch = datetime(1970, 1, 1)
+            return int((dt - epoch).total_seconds() * 1000)
+        except Exception:
+            pass
+    return int('999999999999')
+
+
+def _degraded_duration_min(m):
+    """Durée en MINUTES (schéma du guide) ; 105 min par défaut, bornée."""
+    try:
+        v = int(float(m.get('duration')))
+        if 5 <= v <= 600:
+            return v
+    except Exception:
+        pass
+    return 105
+
+
+def _degraded_teams(m):
+    """(team1, team2) au mieux : champs dédiés, sinon « A vs B » de
+    matchstr, sinon matchText nettoyé (retire l'heure en tête et les
+    segments [crochets] : « 22:00 [Ligue] A vs B [TNT Sports 1 GB] »)."""
+    t1 = m.get('team1')
+    t1 = six.ensure_text(t1, encoding='utf-8', errors='replace').strip() if t1 else u''
+    t2 = m.get('team2')
+    t2 = six.ensure_text(t2, encoding='utf-8', errors='replace').strip() if t2 else u''
+    if t1 and t2:
+        return t1, t2
+    mstr = six.ensure_text(m.get('matchstr') or '', encoding='utf-8', errors='replace').strip()
+    if ' vs ' in mstr:
+        a, b = mstr.split(' vs ', 1)
+        return (t1 or a.strip()), (t2 or b.strip())
+    mt = six.ensure_text(m.get('matchText') or '', encoding='utf-8', errors='replace').strip()
+    mt = re.sub(r'^\d{1,2}:\d{2}\s*', '', mt)
+    mt = re.sub(r'\[[^\]]*\]', '', mt).strip()
+    if mt and ' vs ' in mt:
+        a, b = mt.split(' vs ', 1)
+        return (t1 or a.strip()), (t2 or b.strip())
+    if mt and not t1:
+        return mt, t2
+    return t1, t2
+
+
+def _degraded_channels(m):
+    """Chaînes du match en mode dégradé — RIEN N'EST INVENTÉ :
+    • canal du guide AVEC liens -> dict (name/language/links) d'origine ;
+    • canal SANS liens -> NOM SEUL : la liste des liens du match ira alors
+      les chercher dans la base de chaînes locale (get_links_for_channel),
+      exactement comme la voie stricte traite déjà les chaînes « string » ;
+    • à défaut, champ `channel` (« TNT Sports 1 GB ») -> nom débarassé du
+      code pays."""
+    out = []
+    chs = m.get('channels')
+    if isinstance(chs, list):
+        for c in chs:
+            try:
+                if isinstance(c, dict):
+                    nm = six.ensure_text(c.get('name') or '', encoding='utf-8',
+                                         errors='replace').strip()
+                    if not nm:
+                        continue
+                    c_links = c.get('links')
+                    c_old = c.get('oldLinks')
+                    links = [l for l in ((c_links if isinstance(c_links, list) else [])
+                                         + (c_old if isinstance(c_old, list) else [])) if l]
+                    if links:
+                        out.append({'name': nm,
+                                    'language': six.ensure_text(c.get('language') or '',
+                                                                encoding='utf-8',
+                                                                errors='replace').strip(),
+                                    'links': links,
+                                    'oldLinks': []})
+                    else:
+                        out.append(nm)      # nom seul -> base de chaînes locale
+                elif isinstance(c, six.string_types):
+                    nm = _strip_lang_suffix(c)
+                    if nm:
+                        out.append(nm)
+            except Exception:
+                continue
+    if not out:
+        s = _strip_lang_suffix(m.get('channel'))
+        if s:
+            out.append(s)
+    return out
+
+
+def _degraded_looks_like_match(o):
+    """Un dict « ressemble à un match » s'il porte au moins un nom."""
+    return isinstance(o, dict) and bool(
+        o.get('team1') or o.get('team2') or o.get('matchstr') or o.get('matchText'))
+
+
+def _degraded_find_matches(obj, depth=0):
+    """Première liste d'objets « ressemblant à des matchs » dans un JSON
+    quelconque (clé 'matches', ou liste directe, recherche en profondeur 4)."""
+    if depth > 4:
+        return None
+    if isinstance(obj, list):
+        return obj if (obj and _degraded_looks_like_match(obj[0])) else None
+    if isinstance(obj, dict):
+        ms = obj.get('matches')
+        if isinstance(ms, list) and ms:
+            return ms
+        for v in obj.values():
+            r = _degraded_find_matches(v, depth + 1)
+            if r:
+                return r
+    return None
+
+
+def _degraded_normalize_match(m):
+    """Objet brut -> match au schéma du plugin (mêmes clés que la voie
+    stricte). None si l'objet n'a vraiment rien d'un match."""
+    if not isinstance(m, dict):
+        return None
+    t1, t2 = _degraded_teams(m)
+    if not (t1 or t2):
+        return None
+    return {
+        'team1': t1 or t2,
+        'team2': t2,
+        'matchstr': (u'{0} vs {1}'.format(t1, t2) if (t1 and t2) else (t1 or t2)),
+        'sport': six.ensure_text(m.get('sport') or '', encoding='utf-8', errors='replace'),
+        'league': six.ensure_text(m.get('league') or '', encoding='utf-8',
+                                  errors='replace') or None,
+        'startTimestamp': _degraded_time_ms(m),
+        'duration': _degraded_duration_min(m),
+        'channels': _degraded_channels(m),
+        'important': bool(m.get('important')),
+    }
+
+
+def _degraded_json_candidates(text):
+    """Candidats JSON « liste d'objets » extraits d'une page HTML/JS :
+    1) intérieurs des JSON.parse(`…`) ; 2) tableaux littéraux [ {"…
+    (balayage avec comptage de crochets, respect des chaînes, plafond
+    300 000 caractères et 40 candidats). Tolère les échappements des
+    payloads Next.js."""
+    t = six.ensure_text(text or '', encoding='utf-8', errors='ignore')
+    t = t.replace('\\n', ' ').replace('\\t', ' ').replace('\\"', '"')
+    out = []
+    for m in re.finditer(r'JSON\.parse\(`(\[.+?\])`', t, re.DOTALL):
+        out.append(m.group(1))
+    pos = 0
+    while len(out) < 40:
+        i = t.find('[{"', pos)
+        if i < 0:
+            break
+        depth = 0
+        j = i
+        end = -1
+        instr = False
+        esc = False
+        while j < len(t):
+            ch = t[j]
+            if instr:
+                if esc:
+                    esc = False
+                elif ch == '\\':
+                    esc = True
+                elif ch == '"':
+                    instr = False
+            else:
+                if ch == '"':
+                    instr = True
+                elif ch == '[':
+                    depth += 1
+                elif ch == ']':
+                    depth -= 1
+                    if depth == 0:
+                        end = j + 1
+                        break
+                elif ch == '<':      # ne traverse pas les balises (</script>)
+                    break
+            j += 1
+            if j - i > 300000:
+                break
+        if end > 0:
+            out.append(t[i:end])
+            pos = end
+        else:
+            pos = i + 1
+    return out
+
+
+def _matches_degraded(url):
+    """v3.7.25 (B) — mode dégradé « rapprochement par titre » : quand la
+    lecture stricte de la page ET le repli JSON échouent (le guide a changé
+    de structure), relit les MÊMES données de façon permissive et reconstruit
+    des matchs au schéma du plugin (équipes, heure, chaînes). Aucune source
+    ni aucun lien ajoutés : seuls les contenus déjà servis par le guide sont
+    re-associés. Retourne la liste reconstruite ou None."""
+    texts = []
+    if url != Live_fallback_url:
+        try:
+            texts.append(requests.get(url, timeout=12).text)
+        except Exception:
+            pass
+    try:
+        texts.append(requests.get(Live_fallback_url,
+                                  headers={'User-Agent': client.agent()},
+                                  timeout=12).text)
+    except Exception:
+        pass
+    blobs = []
+    for tx in texts:
+        try:
+            blobs.extend(_degraded_json_candidates(tx))
+        except Exception:
+            continue
+    for b in blobs:
+        try:
+            parsed = json.loads(b)
+        except Exception:
+            try:
+                parsed = json.loads(b.replace(',false', '').replace('\\/', '/'))
+            except Exception:
+                continue
+        raw = _degraded_find_matches(parsed)
+        if not raw:
+            continue
+        matches = []
+        for m in raw[:400]:
+            try:
+                nm = _degraded_normalize_match(m)
+            except Exception:
+                nm = None
+            if nm:
+                matches.append(nm)
+        if matches:
+            if fastcache is not None:
+                fastcache.fset('ev:' + url, matches)
+                fastcache.flush()
+            return matches
+    return None
 
 
 _WARM_INFLIGHT = set()
@@ -1154,13 +1459,131 @@ def _chan_label(chan, lang, fr):
     return u'[COLOR gold]{0}[/COLOR]{1}'.format(chan, u' ' + tag if tag else u'')
 
 
+# ---------------------------------------------------------------------------
+# v3.7.25 (A) — RATTACHEMENT DE SECOURS PAR CHAÎNE : un match a ses chaînes
+# mais le guide n'a fourni AUCUN lien (grille servie à moitié remplie, mise à
+# jour en cours). Le même canal porte TOUJOURS les mêmes liens dans toute la
+# grille (mesuré 03/11/2026 : 54 canaux porteurs, 0 divergence), donc les
+# liens de CES chaînes lus sur les AUTRES matchs de la grille sont les bons.
+# La grille est déjà sur le disque (fastcache) : AUCUNE requête réseau, et
+# AUCUN lien ajouté — on ne fait que re-attacher ce que le guide lui-même a
+# déjà associé à ces mêmes chaînes.
+# ---------------------------------------------------------------------------
+_GRID_INDEX_TTL = 4 * 3600
+_grid_idx_cache = {'at': 0.0, 'idx': {}}
+
+
+def _grid_links_index():
+    """Index nom de chaîne (minuscules, sans espaces) -> (nom, langue,
+    liens) reconstruit depuis les grilles en cache disque. Recalculé au
+    plus toutes les 10 minutes (coût local : lecture d'un cache déjà en
+    mémoire). PAS de correspondance par numéro : les numéros de canaux se
+    répètent entre sports (mesuré : 22 collisions, ex. n°1 = TNT Sports 1
+    OU Sportsnet+)."""
+    now = time.time()
+    if _grid_idx_cache['idx'] and (now - _grid_idx_cache['at']) < 600:
+        return _grid_idx_cache['idx']
+    idx = {}
+    if fastcache is not None:
+        for key in ('ev:' + Live_url, 'ev:' + Live_fallback_url):
+            grid = fastcache.fstale(key, _GRID_INDEX_TTL) or []
+            try:
+                for m in grid:
+                    if not isinstance(m, dict):
+                        continue
+                    for c in (m.get('channels') or []):
+                        if not isinstance(c, dict):
+                            continue
+                        try:
+                            links = [l for l in
+                                     ((c.get('links') or []) + (c.get('oldLinks') or []))
+                                     if l]
+                        except Exception:
+                            links = []
+                        if not links:
+                            continue
+                        nm = six.ensure_text(c.get('name') or '', encoding='utf-8',
+                                             errors='replace').strip()
+                        if not nm:
+                            continue
+                        lang = six.ensure_text(c.get('language') or '', encoding='utf-8',
+                                               errors='replace').strip()
+                        k = re.sub(r'\s+', '', nm.lower())
+                        if k and k not in idx:
+                            idx[k] = (nm, lang, links)
+            except Exception:
+                continue
+    _grid_idx_cache['at'] = now
+    _grid_idx_cache['idx'] = idx
+    return idx
+
+
+def _borrow_links_from_grid(channels):
+    """[(url, libellé)] : liens de secours pour les chaînes du match restées
+    sans liens dans l'entrée du guide. Le filtre « sources françaises » est
+    respecté (les liens empruntés portent la langue de LEUR chaîne)."""
+    if not channels:
+        return []
+    idx = _grid_links_index()
+    if not idx:
+        return []
+    fr_only = _french_only()
+    out = []
+    seen = set()
+    for c in channels:
+        ent = None
+        try:
+            if isinstance(c, dict):
+                if [l for l in ((c.get('links') or []) + (c.get('oldLinks') or [])) if l]:
+                    continue              # cette chaîne a déjà ses propres liens
+                nm = six.ensure_text(c.get('name') or '', encoding='utf-8',
+                                     errors='replace').strip()
+                lang = six.ensure_text(c.get('language') or '', encoding='utf-8',
+                                       errors='replace').strip()
+                if nm:
+                    ent = idx.get(re.sub(r'\s+', '', nm.lower()))
+            else:
+                # chaîne « string » (mode dégradé ou champ `channel`) : le nom
+                # peut porter un code pays collé (« Canal+ Foot FR ») — on
+                # essaie le nom TEL QUEL d'abord (« Sky Sport DE » est un vrai
+                # nom de canal), puis débarassé de son suffixe.
+                raw = six.ensure_text(c, encoding='utf-8', errors='replace').strip()
+                stripped = _strip_lang_suffix(raw)
+                nm = raw
+                lang = u''
+                if raw:
+                    ent = idx.get(re.sub(r'\s+', '', raw.lower()))
+                if not ent and stripped:
+                    ent = idx.get(re.sub(r'\s+', '', stripped.lower()))
+                    if ent:
+                        nm = stripped
+            if not nm or not ent:
+                continue
+            bnm, blang, links = ent
+            fr = _is_french_source(bnm or nm, blang or lang)
+            if fr_only and not fr:
+                continue
+            for u in links:
+                if u in seen:
+                    continue
+                seen.add(u)
+                out.append((u, _chan_label(bnm or nm, blang or lang, fr)))
+        except Exception:
+            continue
+    return out
+
+
 def get_stream(name, url):  # 4
     data = six.ensure_text(base64.b64decode(unquote(url))).strip('\n')
 
     import ast
     fr_only = _french_only()
     sstreams = []
-    for event in ast.literal_eval(data):
+    try:
+        chan_data = ast.literal_eval(data)
+    except Exception:
+        chan_data = []
+    for event in chan_data:
         if not isinstance(event, dict):  # TNT Sports 1
             datos = get_links_for_channel(event) or []
             # xbmc.log('SHOW DATOS: {}'.format(datos))
@@ -1184,6 +1607,14 @@ def get_stream(name, url):  # 4
             for url_ in link:
                 sstreams.append((url_, _chan_label(chan, lang, fr)))
 
+    if len(sstreams) < 1:
+        # v3.7.25 (A) — rattachement de secours par chaîne : les liens de CES
+        # chaînes tels qu'ils figurent sur les autres matchs de la grille
+        # (cache disque, zéro requête, zéro lien ajouté).
+        try:
+            sstreams = _borrow_links_from_grid(chan_data)
+        except Exception:
+            sstreams = []
     if len(sstreams) < 1:
         if fr_only:
             control.infoDialog(u"[COLOR gold]Aucune source française pour ce match.[/COLOR]\n"
