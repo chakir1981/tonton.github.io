@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.23" provider-name="chakir1981">
+<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.24" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -16,6 +16,10 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
+      [B]v3.7.24[/B] 03/11/2026
+- CORRECTION : LES LOGOS NE S'AFFICHAIENT PAS (sur certains Kodi, Android notamment) — les écussons étaient fournis à Kodi sous forme d'adresse internet (https://a.espncdn.com/…), et le téléchargement silencieux des icônes distantes échoue sans message sur certains appareils. Désormais chaque logo est TÉLÉCHARGÉ UNE FOIS dans le profil de l'add-on (cache 30 jours) et la liste reçoit un CHEMIN LOCAL, qui s'affiche toujours, quel que soit l'appareil ou le skin.
+- PREMIÈRE FOIS : les logos se remplissent en arrière-plan (~15 s pour toute la grille) — ils apparaissent quand vous rouvrez la liste ; ensuite ils sont instantanés depuis le disque. Si un logo n'est pas trouvé, l'icône de base revient comme avant ; réglage « Afficher les logos des équipes » inchangé (Paramètres > Réglages). « Vider les données » supprime aussi les logos. Repli : si le stockage local échoue, l'URL distante est conservée (comportement 3.7.23).
+- Rien d'autre ne change : mêmes matchs, mêmes liens d'origine du guide, pastille « dans X min » et mémoire du lien (3.7.23) intactes, toujours SANS aucun lien ajouté.
       [B]v3.7.23[/B] 03/11/2026
 - PASTILLE « DANS X MIN » : les matchs qui commencent dans moins de 15 minutes affichent « · dans 12 min » juste après l'heure — impossible de rater un coup d'envoi (information déjà dans la grille : zéro requête de plus).
 - LOGOS D'ÉQUIPES DANS LA LISTE DES MATCHS : chaque match porte l'écusson de son équipe (équipe 1, sinon équipe 2). Source ESPN (1 requête par compétition : Ligue des champions, Ligue 1, Premier League, LaLiga, NHL, NBA…, gardée 30 jours sur le disque) complétée en arrière-plan par TheSportsDB pour les autres compétitions (leur limite stricte est respectée : 1 requête toutes les 2,5 s). Les noms sont rapprochés intelligemment (accents, « München » = « Munich », « PSG » = « Paris Saint-Germain ») et les faux amis e-sport sont refusés. Nouveau réglage « Afficher les logos des équipes » (ACTIVÉ par défaut) dans Paramètres > Réglages — désactivez-le si vous préférez l'icône unique.

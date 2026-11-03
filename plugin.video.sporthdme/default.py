@@ -3,6 +3,7 @@ from __future__ import print_function
 import xbmcvfs
 import base64
 import hashlib
+import os
 import unicodedata
 import re
 import sys
@@ -211,6 +212,11 @@ def _refresh_matches_bg(url):
 #   2) TheSportsDB (clé de test publique 123) en FILE D'ARRIÈRE-PLAN
 #      (1 requête / 2,5 s, leur limite stricte) pour les équipes hors
 #      compétitions mappées — le logo apparaît à la liste suivante.
+#   v3.7.24 — CHAQUE logo trouvé est téléchargé UNE fois dans le profil
+#   (<profil>/logos/<équipe>.png, cache 30 j) et la liste reçoit un CHEMIN
+#   LOCAL : un chemin disque s'affiche TOUJOURS, là où l'icône distante
+#   (https://…) reste muette sur certains Kodi Android (le cache de
+#   textures de Kodi échoue en silence). Repli : URL distante (3.7.23).
 # Les noms du guide (type Flashscore : « Bayern München », « Bodø / Glimt »,
 # « PSG ») sont normalisés (minuscules, sans accents, sans ponctuation) et
 # rapprochés par : égalité, mots proches (préfixe), alias connus, ou sigle
@@ -394,15 +400,135 @@ def _logo_store(nt, url):
         pass
 
 
+# v3.7.24 — LOGOS LOCAUX. Sur certains Kodi (Android notamment), l'icône
+# distante (https://a.espncdn.com/…, thesportsdb.com/…) ne s'affiche pas :
+# le cache de textures de Kodi télécharge en silence et échoue sans
+# message. Parade : chaque logo est téléchargé une fois dans le profil de
+# l'add-on (<profil>/logos/<équipe>.png, cache 30 j) et la liste reçoit un
+# CHEMIN LOCAL — un chemin disque s'affiche toujours. En cas d'échec on
+# retombe sur l'URL distante (comportement 3.7.23).
+_LOGO_UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+            '(KHTML, like Gecko) Chrome/124.0 Safari/537.36')
+_IMG_MAGIC = (b'\x89PNG', b'\xff\xd8', b'GIF8', b'RIFF')
+_LOGOS_DIR = None
+
+
+def _logos_dir():
+    """Dossier des logos téléchargés (<profil>/logos), créé au besoin.
+    None si le stockage local est impossible (repli : URLs distantes)."""
+    global _LOGOS_DIR
+    if _LOGOS_DIR is not None:
+        return _LOGOS_DIR or None
+    try:
+        d = os.path.join(ADDON_DATA, 'logos')
+        if not xbmcvfs.exists(d):
+            try:
+                xbmcvfs.mkdirs(d)
+            except Exception:
+                xbmcvfs.mkdir(d)
+        _LOGOS_DIR = d if xbmcvfs.exists(d) else None
+    except Exception:
+        _LOGOS_DIR = None
+    return _LOGOS_DIR
+
+
+def _logo_file(nt):
+    """Chemin local du logo d'une équipe normalisée, ou None."""
+    if not nt:
+        return None
+    d = _logos_dir()
+    if not d:
+        return None
+    try:
+        return os.path.join(d, six.ensure_text(
+            nt, encoding='utf-8', errors='replace') + u'.png')
+    except Exception:
+        return None
+
+
+def _logo_download(url, path):
+    """Télécharge un logo dans le profil. True si un fichier image y est.
+    Les écussons font 5-100 Ko ; timeout court et contrôle du contenu
+    (signature PNG/JPEG/GIF/WEBP) : jamais de fichier parasite."""
+    if not url or not path:
+        return False
+    try:
+        r = requests.get(url, headers={'User-Agent': _LOGO_UA}, timeout=8)
+        data = r.content or b''
+        if r.status_code != 200 or len(data) < 300:
+            return False
+        if not any(data[:4].startswith(m) for m in _IMG_MAGIC):
+            return False
+    except Exception:
+        return False
+    try:
+        f = None
+        for _mode in ('wb', 'w'):
+            try:
+                f = xbmcvfs.File(path, _mode)
+                break
+            except Exception:
+                f = None
+        if f is not None:
+            try:
+                f.write(data)
+            finally:
+                f.close()
+        else:
+            raise Exception('xbmcvfs.File indisponible')
+    except Exception:
+        try:
+            with open(control.translatePath(path), 'wb') as fh:
+                fh.write(data)
+        except Exception:
+            return False
+    try:
+        return bool(xbmcvfs.exists(path))
+    except Exception:
+        return True
+
+
+def _logo_local(nt, url=None):
+    """Chemin local du logo : le fichier s'il existe déjà (cache 30 j,
+    mtime du fichier), sinon téléchargement depuis url. None si impossible
+    — l'appelant retombe alors sur l'URL distante."""
+    path = _logo_file(nt)
+    if not path:
+        return None
+    try:
+        if xbmcvfs.exists(path):
+            try:
+                age = time.time() - xbmcvfs.Stat(path).st_mtime()
+            except Exception:
+                age = 0
+            if age < _ROSTER_TTL:
+                return path
+    except Exception:
+        pass
+    if url and _logo_download(url, path):
+        return path
+    try:
+        if xbmcvfs.exists(path):
+            return path              # périmé mais affichable > rien
+    except Exception:
+        pass
+    return None
+
+
 def _tsdb_lookup(nt, team, sport):
     """TheSportsDB en arrière-plan : recherche d'équipe filtrée par sport
     (refuse les faux amis e-sport), nom rapproché par _names_match.
-    Réseau indisponible -> réessai plus tard (pas de négatif)."""
+    Réseau indisponible -> réessai plus tard (pas de négatif).
+    Rend True si une requête TheSportsDB a été faite — le rythme 2,5 s
+    (leur limite stricte) ne s'applique qu'à elles, pas aux simples
+    téléchargements de fichiers (v3.7.24)."""
     if fastcache is not None:
         try:
             hit = fastcache.fget('logo:' + nt, _ROSTER_TTL)
             if hit is not None:
-                return
+                if hit != u'@none':
+                    _logo_local(nt, hit)  # pose le fichier local s'il manque
+                return False
         except Exception:
             pass
     want = _TSDB_SPORT.get(_norm_name(sport)) if sport else None
@@ -415,7 +541,7 @@ def _tsdb_lookup(nt, team, sport):
             timeout=8)
         teams = (r.json() or {}).get('teams') or []
     except Exception:
-        return
+        return True                 # requête tentée -> respecter le rythme
     pick = None
     for t in teams:
         if want and (t.get('strSport') or '') != want:
@@ -432,8 +558,10 @@ def _tsdb_lookup(nt, team, sport):
                 break
     if pick and pick.get('strBadge'):
         _logo_store(nt, pick['strBadge'])
+        _logo_local(nt, pick['strBadge'])   # v3.7.24 — fichier local tout de suite
     elif teams:
         _logo_store(nt, u'@none')       # cherché et pas trouvé -> négatif
+    return True
 
 
 def _logo_queue_add(team, sport):
@@ -461,8 +589,14 @@ def _logo_thread_start():
                     if not _LOGO_QUEUE:
                         break
                     nt, team, sport = _LOGO_QUEUE.pop(0)
-                _tsdb_lookup(nt, team, sport)
-                time.sleep(2.5)         # limite TheSportsDB (test key)
+                try:
+                    slow = _tsdb_lookup(nt, team, sport)
+                except Exception:
+                    slow = False
+                if slow:
+                    time.sleep(2.5)     # limite TheSportsDB (test key) :
+                                        # les simples téléchargements de
+                                        # fichiers (v3.7.24) n'attendent pas
         except Exception:
             pass
         finally:
@@ -481,10 +615,13 @@ def _logo_thread_start():
 
 
 def _team_logo(team, league=None, sport=None):
-    """URL du logo d'une équipe, ou '' (icône de base conservée).
-    Cache 30 j (négatif 7 j). Hors cache : compétition mappée ESPN
-    (requête directe, budget de temps par affichage) sinon file
-    d'attente TheSportsDB en ARRIÈRE-PLAN — jamais dans le fil d'affichage."""
+    """Chemin LOCAL du logo d'une équipe, ou URL distante en repli, ou ''
+    (icône de base conservée). Cache 30 j (négatif 7 j). Hors cache :
+    compétition mappée ESPN (requête directe, budget de temps par
+    affichage) sinon file d'attente TheSportsDB en ARRIÈRE-PLAN — jamais
+    dans le fil d'affichage. v3.7.24 : le logo trouvé est téléchargé dans
+    le profil et servi en CHEMIN LOCAL (l'icône distante ne s'affiche pas
+    sur tous les Kodi) ; repli : URL distante (3.7.23)."""
     if not team or not _team_logos_setting():
         return ''
     nt = _norm_name(team)
@@ -494,7 +631,20 @@ def _team_logo(team, league=None, sport=None):
         try:
             hit = fastcache.fget('logo:' + nt, _ROSTER_TTL)
             if hit is not None:
-                return '' if hit == u'@none' else hit
+                if hit == u'@none':
+                    return ''
+                # v3.7.24 — le fichier local d'abord : il s'affiche toujours
+                path = _logo_file(nt)
+                if path and xbmcvfs.exists(path):
+                    return path
+                if _LOGO_INLINE_BUDGET[0] < 2.5:
+                    t0 = time.time()
+                    local = _logo_local(nt, hit)
+                    _LOGO_INLINE_BUDGET[0] += time.time() - t0
+                    if local:
+                        return local
+                _logo_queue_add(team, sport)   # fond : pose le fichier
+                return hit                     # repli : URL distante (3.7.23)
         except Exception:
             pass
     slug = _espn_slug_for_league(league)
@@ -510,7 +660,12 @@ def _team_logo(team, league=None, sport=None):
                     best, best_s = href, sc
             if best:
                 _logo_store(nt, best)
-                return best
+                t1 = time.time()
+                local = _logo_local(nt, best)
+                _LOGO_INLINE_BUDGET[0] += time.time() - t1
+                if local:
+                    return local
+                return best        # repli : URL distante (3.7.23)
     _logo_queue_add(team, sport)
     return ''
 
@@ -2220,6 +2375,15 @@ def router(paramstring):
                     _os.remove(_fc)
                 if fastcache is not None:
                     fastcache._items = None   # sera rechargé au prochain accès
+            except Exception:
+                pass
+            # v3.7.24 — les logos téléchargés font partie des données
+            try:
+                import os as _os
+                _lg = _os.path.join(ADDON_DATA, 'logos')
+                _lfiles, _ldirs = xbmcvfs.listdir(_lg)
+                for _f in (_lfiles or []):
+                    xbmcvfs.deleteFile(_os.path.join(_lg, _f))
             except Exception:
                 pass
             # v3.7.8 — la base de chaînes et son index sont aussi des données
