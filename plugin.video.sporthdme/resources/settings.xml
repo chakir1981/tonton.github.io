@@ -6,4 +6,8 @@
         <setting id="auto_next" type="bool" label="Si un lien ne répond pas, essayer automatiquement le suivant" default="true" />
         <setting id="timezone" label="Choisir le fuseau horaire" type="select" values="-12|-11|-10|-9|-8|-7|-6|-5|-4|-3|-2|-1|0|+1|+2|+3|+4|+5|+6|+7|+8|+9|+10|+11|+12" default="+3" sort="yes" />
     </category>
+    <category label="Expérimental (bêta)">
+        <setting id="beta_custom_links" type="bool" label="[BÊTA] Liens personnalisés du guide (même source, rien d'ajouté)" default="false" />
+        <setting id="beta_official_epg" type="bool" label="[BÊTA] Indiquer dans la fiche les chaînes FR officielles qui diffusent chaque match (grille TV publique — info seule)" default="false" />
+    </category>
 </settings>

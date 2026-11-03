@@ -31,6 +31,7 @@ except Exception:
     fastcache = None
 import threading
 import time
+import unicodedata    # v3.7.27 — normalisation des noms (grilles FR bêta)
 from dateutil.parser import parse
 from dateutil.tz import gettz
 from dateutil import parser, tz
@@ -66,6 +67,15 @@ Live_url = 'https://league.st'  # super.league.st died Sep 2026; bare league.st 
 Live_fallback_url = 'https://tvsport.guide/proxy.php?source=index'  # same matches schema, JSON
 headers = {'User-Agent': client.agent(),
            'Referer': BASEURL}
+
+# v3.7.27 (B1 bêta) — liens personnalisés ÉVENTUELS publiés par le guide lui-même
+# (matchstream/custom_links.php, tableau JSON — vide le 03/11/2026). Ce n'est PAS
+# une nouvelle source : c'est le même guide, son propre mécanisme d'extension.
+Custom_links_url = 'https://tvsport.guide/matchstream/custom_links.php'
+# v3.7.27 (B6 bêta) — grille TV publique FR (XMLTV, information seule : AUCUN
+# flux). Sert à écrire dans la fiche du match la chaîne FR officielle qui le
+# diffuse (Canal+ Foot, Canal+ Live 1-19, beIN 1-3/MAX, L'Équipe…).
+EPG_FR_URL = 'https://epgshare01.online/epgshare01/epg_ripper_FR1.xml.gz'
 
 # Kodi 19+ prefers LOGINFO; Kodi 18 still has LOGNOTICE — same idea: visible in kodi.log
 # without turning on full "debug logging".
@@ -517,6 +527,364 @@ def _refresh_matches_bg(url):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# v3.7.27 — OPTIONS BÊTA (désactivées par défaut, Paramètres > Expérimental)
+#   B1 : consommer les liens personnalisés ÉVENTUELS que le guide publierait
+#        dans son propre endpoint custom_links.php (même source, pas une
+#        nouvelle source ; parser défensif : le format n'est pas documenté).
+#   B6 : lire la grille TV publique FR (XMLTV epgshare01, 5 Mo gz, mise à jour
+#        quotidienne mesurée 11:38) pour écrire dans la FICHE du match la
+#        chaîne française officielle qui le diffuse (info seule — AUCUN flux
+#        ajouté, le filtre « sources françaises » reste basé sur les liens
+#        réellement fournis par le guide). Mesuré 03/11/2026 : 32 des 114
+#        matchs du guide sont identifiés en plus (LDC/UEFA sur Canal+ Live
+#        2-19, NBA/NHL sur beIN 1-3/MAX).
+# ---------------------------------------------------------------------------
+
+
+def _beta_custom():
+    """Réglage BÊTA B1 — liens personnalisés du guide (désactivé par défaut)."""
+    try:
+        return (ADDON.getSetting('beta_custom_links') or 'false').lower() == 'true'
+    except Exception:
+        return False
+
+
+def _beta_epg():
+    """Réglage BÊTA B6 — chaînes FR des grilles TV officielles (désactivé par défaut)."""
+    try:
+        return (ADDON.getSetting('beta_official_epg') or 'false').lower() == 'true'
+    except Exception:
+        return False
+
+
+_NORM_TRANS = {0x00f8: u'o', 0x0111: u'd', 0x0142: u'l', 0x00e6: u'ae',
+               0x0153: u'oe', 0x00df: u'ss', 0x00f0: u'd', 0x00fe: u'th',
+               0x0127: u'h'}
+
+
+def _norm_txt(s):
+    """Minuscules sans accents, lettres nordiques translittérées :
+    « Bodø / Glimt » -> « bodo glimt » (le guide et l'EPG n'écrivent pas
+    toujours ø de la même façon)."""
+    s = six.ensure_text(s or u'', encoding='utf-8', errors='replace')
+    s = s.lower().translate(_NORM_TRANS)
+    s = unicodedata.normalize('NFD', s)
+    s = u''.join(c for c in s if unicodedata.category(c) != 'Mn')
+    return re.sub(u'[^a-z0-9]+', u' ', s).strip()
+
+
+def _team_tokens(s):
+    """Mots significatifs d'un nom d'équipe (« Bodø / Glimt » -> ['bodo','glimt'])."""
+    stop = set((u'fc', u'cf', u'ac', u'as', u'sc', u'ss', u'fk', u'bk', u'if', u'cd', u'cf'))
+    return [t for t in _norm_txt(s).split() if len(t) > 2 and t not in stop]
+
+
+# ---- B1 : liens personnalisés du guide ------------------------------------
+
+
+def _custom_links_fetch():
+    """Tableau JSON de custom_links.php -> entrées normalisées. Le format n'étant
+    pas documenté, CHAQUE entrée est lue de façon défensive : on accepte les
+    clés usuelles (team1/team2, match, title, slug, channel, name, links,
+    urls, oldLinks, url, channels). Retourne une liste (vide si rien)."""
+    data = None
+    if fastcache is not None:
+        data = fastcache.fget('cl:custom', 1800)
+        if data is not None:
+            return data
+    try:
+        r = requests.get(Custom_links_url, headers={'User-Agent': client.agent()}, timeout=10)
+        data = r.json()
+    except Exception as e:
+        log_info('custom links fetch failed: {0!r}'.format(e))
+        data = []
+    if not isinstance(data, list):
+        data = []
+    out = []
+    for ent in data[:200]:
+        try:
+            if not isinstance(ent, dict):
+                continue
+            # --- équipes/match visés
+            t1 = ent.get('team1') or u''
+            t2 = ent.get('team2') or u''
+            mm = ent.get('match') or ent.get('title') or ent.get('matchstr') or u''
+            if mm and u' vs ' in mm and not (t1 and t2):
+                a, b = mm.split(u' vs ', 1)
+                t1, t2 = t1 or a, t2 or b
+            slug = six.ensure_text(ent.get('slug') or u'', encoding='utf-8',
+                                   errors='replace')
+            toks = set(_team_tokens(t1)) | set(_team_tokens(t2))
+            if len(toks) < 2 and slug:
+                toks = set(w for w in _norm_txt(slug).split() if len(w) > 2)
+            if len(toks) < 2:
+                continue
+            # --- chaînes + liens
+            chans = []
+            cs = ent.get('channels')
+            if isinstance(cs, list) and cs:
+                for c in cs:
+                    if isinstance(c, dict) and (c.get('links') or c.get('url')):
+                        us = [u for u in ((c.get('links') or []) +
+                                          (c.get('oldLinks') or []) +
+                                          ([c.get('url')] if c.get('url') else [])) if u]
+                        if us:
+                            chans.append((six.ensure_text(c.get('name') or u'',
+                                                          encoding='utf-8',
+                                                          errors='replace'),
+                                          six.ensure_text(c.get('language') or u'',
+                                                          encoding='utf-8',
+                                                          errors='replace'), us))
+            us = [u for u in ((ent.get('links') if isinstance(ent.get('links'), list) else [])
+                              + (ent.get('urls') if isinstance(ent.get('urls'), list) else [])
+                              + ([ent.get('url')] if isinstance(ent.get('url'), six.string_types) else [])) if u]
+            if us:
+                chans.append((six.ensure_text(ent.get('name') or ent.get('channel') or u'',
+                                              encoding='utf-8', errors='replace'),
+                              six.ensure_text(ent.get('language') or u'',
+                                              encoding='utf-8', errors='replace'), us))
+            if not chans:
+                continue
+            out.append({'tokens': toks, 'channels': chans})
+        except Exception:
+            continue
+    if fastcache is not None:
+        fastcache.fset('cl:custom', out)
+        fastcache.flush()
+    return out
+
+
+def _apply_custom_links(matches):
+    """Fusionne les liens personnalisés du guide dans les matchs visés : la
+    chaîne custom devient un canal de plus du match (même schéma que la grille),
+    si les DEUX équipes du match figurent dans les repères de l'entrée. Aucune
+    URL en dur : tout vient du fichier du guide. Doublons d'URL refusés."""
+    if not matches:
+        return matches
+    ents = _custom_links_fetch()
+    if not ents:
+        return matches
+    added = 0
+    for m in matches:
+        try:
+            if not isinstance(m, dict):
+                continue
+            t1 = m.get('team1') or u''
+            t2 = m.get('team2') or u''
+            if not (t1 and t2):
+                continue
+            ta, tb = set(_team_tokens(t1)), set(_team_tokens(t2))
+            if not (ta and tb):
+                continue
+            chs = m.get('channels')
+            if not isinstance(chs, list):
+                chs = []
+            seen = set()
+            for c in chs:
+                try:
+                    if isinstance(c, dict):
+                        for u in (c.get('links') or []):
+                            seen.add(six.ensure_text(u, encoding='utf-8',
+                                                     errors='replace'))
+                except Exception:
+                    continue
+            for ent in ents:
+                if not (ta <= ent['tokens'] and tb <= ent['tokens']):
+                    continue
+                for nm, lg, us in ent['channels']:
+                    fresh = [u for u in us
+                             if six.ensure_text(u, encoding='utf-8',
+                                                errors='replace') not in seen]
+                    if not fresh:
+                        continue
+                    seen.update(six.ensure_text(u, encoding='utf-8',
+                                                errors='replace') for u in fresh)
+                    chs.append({'name': nm or u'Liens du guide',
+                                'language': lg,
+                                'links': fresh,
+                                'oldLinks': []})
+                    added += 1
+            m['channels'] = chs
+        except Exception:
+            continue
+    if added:
+        log_info('custom links: {0} canal(aux) fusionné(s)'.format(added))
+    return matches
+
+
+# ---- B6 : chaînes FR des grilles TV officielles (info seule) ---------------
+
+_EPG_CH_RE = re.compile(u'|'.join([
+    u'^beIN\\.SPORTS\\.[123]\\.fr$', u'^beIN\\.SPORTS\\.MAX\\.(?:[4-9]|10)\\.fr$',
+    u'^Canal\\+\\.Foot\\.fr$', u'^CANAL\\+FOOT\\.fr$',
+    u'^Canal\\+\\.Sport\\.fr$', u'^CANAL\\+SPORT\\.fr$',
+    u'^Canal\\+\\.Sport\\.360\\.fr$', u'^CANAL\\+SPORT360\\.fr$',
+    u'^CANAL\\+LIVE\\.(?:[1-9]|1[0-9])\\.fr$',
+    u'^Canal\\+\\.fr$', u'^CANAL\\+\\.fr$',
+    u"^L'Equipe\\.fr$", u'^DAZN\\.1\\.fr$', u'^RMC\\.Sport\\.[12]\\.fr$',
+]))
+
+
+def _epg_cache_path():
+    return control.translatePath(ADDON_DATA + 'epg_fr.json')
+
+
+def _epg_prog_re():
+    return re.compile(
+        u'<programme channel="([^"]+)" start="([0-9]{14})[^"]*" '
+        u'stop="([0-9]{14})[^"]*">\\s*<title[^>]*>([^<]+)</title>', re.S)
+
+
+def _epg_ms(s):
+    """« 20261103050000 » (heure locale de la grille) -> ms epoch naïf :
+    les fenêtres étant comparées ENTRE elles (grille guide = UTC+2 fixe,
+    EPG = heure FR fixe), un décalage constant de ±1 h n'empêche jamais
+    l'appariement (fenêtre de tolérance 90 min de chaque côté)."""
+    try:
+        import calendar
+        return calendar.timegm((int(s[0:4]), int(s[4:6]), int(s[6:8]),
+                                int(s[8:10]), int(s[10:12]), int(s[12:14]),
+                                0, 0, 0)) * 1000
+    except Exception:
+        return 0
+
+
+def _epg_build_cache():
+    """Télécharge la grille FR du jour (5 Mo gz), n'en garde que les programmes
+    des chaînes sportives FR cibles (~1 700), écrit un JSON léger dans le
+    profil : {'_date': 'AAAA-MM-JJ', 'progs': [[début, fin, chaîne, titre], …]}.
+    Panne réseau ou XML cassé -> cache conservé, exception silencieuse."""
+    import gzip as _gzip
+    p = _epg_cache_path()
+    today = _epg_today()
+    try:
+        if xbmcvfs.exists(p):
+            f = xbmcvfs.File(p)
+            try:
+                raw = f.read()
+                if isinstance(raw, bytes):
+                    raw = raw.decode('utf-8', 'replace')
+                old = json.loads(raw)
+            finally:
+                f.close()
+            if isinstance(old, dict) and old.get('_date') == today:
+                return old
+    except Exception:
+        pass
+    raw = None
+    try:
+        r = requests.get(EPG_FR_URL, timeout=60)
+        raw = _gzip.decompress(r.content) if r.content[:2] == b'\x1f\x8b' else r.content
+    except Exception as e:
+        log_info('epg fr download failed: {0!r}'.format(e))
+        return None
+    txt = None
+    try:
+        txt = raw.decode('utf-8', 'replace')
+    except Exception:
+        return None
+    names = {}
+    for cid, blk in re.findall(u'<channel id="([^"]+)">(.*?)</channel>', txt, re.S):
+        if _EPG_CH_RE.match(cid):
+            mm = re.search(u'<display-name[^>]*>([^<]+)', blk)
+            if mm:
+                names[cid] = (mm.group(1).replace(u'&apos;', u"'")
+                              .replace(u'&amp;', u'&'))
+    progs = []
+    for cid, st, sp, ti in _epg_prog_re().findall(txt):
+        if cid in names:
+            progs.append([_epg_ms(st), _epg_ms(sp), names[cid], _norm_txt(ti)])
+    if not progs:
+        log_info('epg fr: aucune chaîne cible reconnue (format changé ?)')
+        return None
+    data = {'_date': today, 'progs': progs[:4000]}
+    try:
+        f = xbmcvfs.File(p, 'w')
+        f.write(six.ensure_binary(json.dumps(data), encoding='utf-8'))
+        f.close()
+    except Exception as e:
+        log_info('epg fr cache write failed: {0!r}'.format(e))
+    return data
+
+
+def _epg_today():
+    try:
+        return datetime.now().strftime('%Y-%m-%d')
+    except Exception:
+        return u''
+
+
+def _epg_map(matches):
+    """Apparie chaque match (les DEUX équipes dans le titre du programme,
+    fenêtre 90 min) -> {« A vs B »: [« Canal+ Foot », …]}. Zéro réseau :
+    travaille sur le cache du jour déjà écrit."""
+    data = _epg_build_cache()
+    if not data:
+        return {}
+    progs = data.get('progs') or []
+    if not progs:
+        return {}
+    out = {}
+    for m in matches[:400]:
+        try:
+            if not isinstance(m, dict):
+                continue
+            t1, t2 = m.get('team1') or u'', m.get('team2') or u''
+            if not (t1 and t2):
+                continue
+            ta, tb = _team_tokens(t1), _team_tokens(t2)
+            if not (ta and tb):
+                continue
+            st = m.get('startTimestamp') or 0
+            try:
+                st = float(st)
+                if st < 1e11:          # secondes -> ms
+                    st *= 1000.0
+            except Exception:
+                st = 0
+            chans = []
+            for s, e, cn, tn in progs:
+                if st and not (s - 5400e3 <= st <= e + 5400e3):
+                    continue
+                if all(w in tn for w in ta) and all(w in tn for w in tb):
+                    if cn not in chans:
+                        chans.append(cn)
+            if chans:
+                key = u'{0} vs {1}'.format(t1, t2)
+                out[key] = chans[:6]
+        except Exception:
+            continue
+    return out
+
+
+def _epg_bg(matches):
+    """Fil d'arrière-plan B6 : construit/rafraîchit le cache du jour (télé-
+    chargement lourd 1×/jour max) puis publie le mapping dans fastcache."""
+    try:
+        mp = _epg_map(matches)
+        if mp and fastcache is not None:
+            fastcache.fset('epgfr:map', mp)
+            fastcache.flush()
+            log_info('epg fr: {0} match(s) identifié(s) en FR'.format(len(mp)))
+    except Exception as e:
+        log_info('epg fr bg failed: {0!r}'.format(e))
+
+
+def _epg_channels_for(event):
+    """Chaînes FR officielles d'un match (« A vs B ») selon la grille du jour.
+    Lecture instantanée (fastcache) : [] si absent ou bêta désactivée."""
+    if fastcache is None:
+        return []
+    try:
+        mp = fastcache.fget('epgfr:map', 7200)
+        if isinstance(mp, dict):
+            return mp.get(event) or []
+    except Exception:
+        pass
+    return []
+
+
 def get_events(url):  # 5
     # v3.7.6/3.7.7 — menu toujours instantané : la liste des matchs vit sur
     # le disque du profil (fastcache, porté de la 3.7.4).
@@ -536,6 +904,14 @@ def get_events(url):  # 5
     if not matches:
         control.infoDialog(u"[COLOR red]Aucun match programmé.[/COLOR]", NAME, ICON, 5000)
         return
+
+    # v3.7.27 (B1 bêta) — fusionner les liens personnalisés ÉVENTUELS que le
+    # guide publierait dans son propre endpoint (aucune source ajoutée).
+    if _beta_custom():
+        try:
+            matches = _apply_custom_links(matches)
+        except Exception:
+            pass
 
     # matches = re.findall('''null\,(\{"(?:matches|customNotFoundMessage).+?)\]\}\]n''', events, re.DOTALL)[0]
     # pattern = r'("matches"\s*\:\s*\[.+?])}]}]n"'
@@ -657,6 +1033,17 @@ def get_events(url):  # 5
                 continue
         if chan_names:
             plot.append(u'Chaînes : ' + u', '.join(chan_names))
+        # v3.7.27 (B6 bêta) — « Aussi diffusé sur » : chaînes FR officielles
+        # reconnues dans la grille TV publique du jour (INFORMATION SEULE :
+        # aucun flux ajouté, le filtre FR reste basé sur les liens réels).
+        if _beta_epg():
+            try:
+                _fr_epg = _epg_channels_for(event)
+                if _fr_epg:
+                    plot.append(u'Aussi diffusé sur (grille TV FR) : '
+                                + u', '.join(_fr_epg))
+            except Exception:
+                pass
         info = {'title': _plain(event), 'plot': u'\n'.join(plot),
                 'genre': six.ensure_text(sport, encoding='utf-8', errors='replace') or u'Sport'}
         event_list.append([name, compare, channels, icon, sport, info,
@@ -672,6 +1059,16 @@ def get_events(url):  # 5
             control.infoDialog(u"[COLOR gold]Tous les matchs du moment sont terminés (masqués).[/COLOR]\n"
                                u"[COLOR lime]Réglage : « Masquer les matchs terminés ».[/COLOR]", NAME, ICON, 7000)
         return
+    # v3.7.27 (B6 bêta) — construire/rafraîchir en ARRIÈRE-PLAN la grille TV
+    # FR du jour et son mapping (téléchargement lourd 1×/jour max ; la liste
+    # ne bloque JAMAIS dessus, l'info apparaît aux ouvertures suivantes).
+    if _beta_epg() and fastcache is not None:
+        try:
+            if fastcache.fget('epgfr:map', 1800) is None and event_list:
+                threading.Thread(target=_epg_bg, args=(matches,),
+                                 daemon=True).start()
+        except Exception:
+            pass
     # v3.7.8 — tri par heure (comme avant) ou groupement par sport (réglage)
     if False:  # v3.7.20 — jamais de groupement par sport (réglage retiré des Paramètres)
         events = sorted(event_list, key=lambda x: (six.ensure_text(x[4], encoding='utf-8', errors='replace').lower(), x[1]))
