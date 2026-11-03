@@ -4,7 +4,6 @@ import xbmcvfs
 import base64
 import hashlib
 import os
-import unicodedata
 import re
 import sys
 import six
@@ -508,471 +507,14 @@ def _refresh_matches_bg(url):
 
 
 # ---------------------------------------------------------------------------
-# v3.7.23 — LOGOS D'ÉQUIPES dans la liste des matchs. Deux sources,
-# ZÉRO flux vidéo ajouté (aucun lien de lecture n'est modifié) :
-#   1) ESPN (API publique) : UNE requête par compétition renvoie toutes les
-#      équipes et leurs logos (cache disque 30 j) — rapide, sans limite
-#      pratique ; réservé aux compétitions mappées ci-dessous, avec un
-#      budget de temps par affichage pour ne jamais ralentir la liste ;
-#   2) TheSportsDB (clé de test publique 123) en FILE D'ARRIÈRE-PLAN
-#      (1 requête / 2,5 s, leur limite stricte) pour les équipes hors
-#      compétitions mappées — le logo apparaît à la liste suivante.
-#   v3.7.24 — CHAQUE logo trouvé est téléchargé UNE fois dans le profil
-#   (<profil>/logos/<équipe>.png, cache 30 j) et la liste reçoit un CHEMIN
-#   LOCAL : un chemin disque s'affiche TOUJOURS, là où l'icône distante
-#   (https://…) reste muette sur certains Kodi Android (le cache de
-#   textures de Kodi échoue en silence). Repli : URL distante (3.7.23).
-# Les noms du guide (type Flashscore : « Bayern München », « Bodø / Glimt »,
-# « PSG ») sont normalisés (minuscules, sans accents, sans ponctuation) et
-# rapprochés par : égalité, mots proches (préfixe), alias connus, ou sigle
-# (« PSG » = initiales de « Paris Saint-Germain »).
+# v3.7.26 — LOGOS D'ÉQUIPES SUPPRIMÉS (ESPN + TheSportsDB + téléchargement
+# local + réglage « team_logos »). Demande utilisateur : « fais aussi la
+# suppression des logos » — ces 460 lignes ralentissaient la liste au
+# premier passage de chaque compétition (requête ESPN bloquante, budget
+# 2,5 s) et consommaient réseau/CPU en arrière-plan (fil TheSportsDB).
+# La liste affiche l'icône de base de l'add-on ; « Vider les données »
+# supprime toujours le dossier logos/ posé par les anciennes versions.
 # ---------------------------------------------------------------------------
-ESPN_LEAGUES = [
-    (u'uefa champions league', 'soccer/uefa.champions'),
-    (u'uefa europa conference', 'soccer/uefa.europa.conf'),
-    (u'uefa europa league', 'soccer/uefa.europa'),
-    (u'england premier league', 'soccer/eng.1'),
-    (u'england championship', 'soccer/eng.2'),
-    (u'france ligue 1', 'soccer/fra.1'),
-    (u'france ligue 2', 'soccer/fra.2'),
-    (u'spain laliga 2', 'soccer/esp.2'),
-    (u'spain laliga', 'soccer/esp.1'),
-    (u'spain copa del rey', 'soccer/esp.copa_del_rey'),
-    (u'italy serie a', 'soccer/ita.1'),
-    (u'italy serie b', 'soccer/ita.2'),
-    (u'germany bundesliga', 'soccer/ger.1'),
-    (u'netherlands eredivisie', 'soccer/ned.1'),
-    (u'portugal primeira liga', 'soccer/por.1'),
-    (u'sweden allsvenskan', 'soccer/swe.1'),
-    (u'belgium pro league', 'soccer/bel.1'),
-    (u'saudi arabia pro league', 'soccer/ksa.1'),
-    (u'turkey super lig', 'soccer/tur.1'),
-    (u'scotland premiership', 'soccer/sco.1'),
-    (u'nhl', 'hockey/nhl'),
-    (u'nba', 'basketball/nba'),
-    (u'euroleague', 'basketball/euroleague'),
-]
-# variantes d'orthographe du guide vs bases de logos
-_ALIAS = {u'munchen': u'munich', u'koln': u'cologne'}
-# sport du guide -> strSport TheSportsDB (filtre anti faux amis : « PSG »
-# renvoie d'abord « PSG Talon », une équipe e-sport)
-_TSDB_SPORT = {u'football': 'Soccer', u'basketball': 'Basketball',
-               u'hockey': 'Ice Hockey', u'american football': 'American Football',
-               u'baseball': 'Baseball', u'rugby': 'Rugby', u'tennis': 'Tennis'}
-_ROSTER_TTL = 30 * 86400    # compétitions / logos : ça change rarement
-_LOGO_NEG_TTL = 7 * 86400   # équipe introuvable : on retentera dans 7 j
-_LOGO_QUEUE = []            # [(norm, nom, sport)] à résoudre en arrière-plan
-_LOGO_LOCK = threading.Lock()
-_LOGO_THREAD_ALIVE = []
-_LOGO_INLINE_BUDGET = [0.0]  # secondes ESPN dépensées pour cet affichage
-_CHARMAP = {u'ø': u'o', u'æ': u'ae', u'å': u'a', u'đ': u'd', u'ł': u'l',
-            u'ß': u'ss', u'ı': u'i', u'ð': u'd', u'þ': u'th'}
-
-
-def _team_logos_setting():
-    """Réglage « Afficher les logos des équipes » (activé par défaut)."""
-    try:
-        return (ADDON.getSetting('team_logos') or 'true').strip().lower() == 'true'
-    except Exception:
-        return True
-
-
-def _norm_name(s):
-    """Minuscules, sans accents (München -> munchen), sans ponctuation
-    (Bodø / Glimt -> bodo glimt)."""
-    try:
-        s = six.ensure_text(s, encoding='utf-8', errors='replace').lower()
-    except Exception:
-        s = u''
-    s = u''.join(_CHARMAP.get(ch, ch) for ch in s)
-    try:
-        s = unicodedata.normalize('NFKD', s)
-        s = u''.join(ch for ch in s if not unicodedata.combining(ch))
-    except Exception:
-        pass
-    s = re.sub(r'[^a-z0-9 ]+', u' ', s)
-    return re.sub(r' +', u' ', s).strip()
-
-
-def _tok_eq(a, b):
-    """2 = mot identique, 1 = proche (préfixe / alias), 0 = différent."""
-    if a == b:
-        return 2
-    if len(a) >= 4 and len(b) >= 4 and (a.startswith(b) or b.startswith(a)):
-        return 1
-    if _ALIAS.get(a) == b or _ALIAS.get(b) == a:
-        return 1
-    return 0
-
-
-def _names_match(a, b):
-    """Le nom du guide a-t-il un équivalent dans la base de logos ?
-    Score : 4 = égalité, 3 = mêmes mots / inclusion exacte, 2 = mots proches
-    ou sigle, 0 = non."""
-    na, nb = _norm_name(a), _norm_name(b)
-    if not na or not nb:
-        return 0
-    if na == nb:
-        return 4
-    ta, tb = na.split(), nb.split()
-    sa, sb = set(ta), set(tb)
-    if sa == sb:
-        return 3
-    # sigle : « psg » = initiales (dans l'ordre) de « paris saint germain »
-    if len(ta) == 1 and len(tb) >= 3 and u''.join(w[0] for w in tb) == ta[0]:
-        return 2
-    if len(tb) == 1 and len(ta) >= 3 and u''.join(w[0] for w in ta) == tb[0]:
-        return 2
-    small, big = (sa, sb) if len(sa) <= len(sb) else (sb, sa)
-    matched, exact = 0, 0
-    for t in small:
-        best = 0
-        for u2 in big:
-            e = _tok_eq(t, u2)
-            if e > best:
-                best = e
-        if best == 0:
-            return 0            # un mot sans équivalent -> pas un match
-        matched += 1
-        if best == 2:
-            exact += 1
-    if matched == len(small):
-        if len(sa) == 1 and len(sb) > 1 and exact:
-            return 3            # « Roma » dans « as roma »
-        return 2                # « internazionale » ~ « inter milan »
-    return 0
-
-
-def _espn_slug_for_league(lname):
-    if not lname:
-        return None
-    nl = _norm_name(lname)
-    for key, slug in ESPN_LEAGUES:      # key déjà normalisée ; les plus
-        if key in nl:                   # spécifiques d'abord
-            return slug
-    return None
-
-
-def _espn_roster(slug):
-    """{nom_normalisé: (nom affiché, url_logo)} pour une compétition ESPN
-    (cache disque 30 j). None si indisponible."""
-    if fastcache is None:
-        cache = None
-    else:
-        try:
-            cache = fastcache.fget('espnroster:' + slug, _ROSTER_TTL)
-        except Exception:
-            cache = None
-    if cache:
-        return cache
-    try:
-        r = requests.get(
-            'https://site.api.espn.com/apis/site/v2/sports/{0}/teams'.format(slug),
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                                   'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'},
-            timeout=6)
-        data = r.json()
-        teams = (data.get('sports') or [{}])[0].get('leagues', [{}])[0].get('teams') or []
-    except Exception:
-        return None
-    out = {}
-    for t in teams:
-        t = (t or {}).get('team') or {}
-        nm = t.get('displayName')
-        logos = t.get('logos') or []
-        if not nm or not logos:
-            continue
-        href = logos[0].get('href') or ''
-        if href:
-            out[_norm_name(nm)] = (nm, href)
-    if fastcache is not None and out:
-        try:
-            fastcache.fset('espnroster:' + slug, out)
-            fastcache.flush()
-        except Exception:
-            pass
-    return out or None
-
-
-def _logo_store(nt, url):
-    """Mémoire du logo (url, ou '@none' = introuvable, négatif 7 j)."""
-    if fastcache is None:
-        return
-    try:
-        fastcache.fset('logo:' + nt, url or u'@none')
-        fastcache.flush()
-    except Exception:
-        pass
-
-
-# v3.7.24 — LOGOS LOCAUX. Sur certains Kodi (Android notamment), l'icône
-# distante (https://a.espncdn.com/…, thesportsdb.com/…) ne s'affiche pas :
-# le cache de textures de Kodi télécharge en silence et échoue sans
-# message. Parade : chaque logo est téléchargé une fois dans le profil de
-# l'add-on (<profil>/logos/<équipe>.png, cache 30 j) et la liste reçoit un
-# CHEMIN LOCAL — un chemin disque s'affiche toujours. En cas d'échec on
-# retombe sur l'URL distante (comportement 3.7.23).
-_LOGO_UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-            '(KHTML, like Gecko) Chrome/124.0 Safari/537.36')
-_IMG_MAGIC = (b'\x89PNG', b'\xff\xd8', b'GIF8', b'RIFF')
-_LOGOS_DIR = None
-
-
-def _logos_dir():
-    """Dossier des logos téléchargés (<profil>/logos), créé au besoin.
-    None si le stockage local est impossible (repli : URLs distantes)."""
-    global _LOGOS_DIR
-    if _LOGOS_DIR is not None:
-        return _LOGOS_DIR or None
-    try:
-        d = os.path.join(ADDON_DATA, 'logos')
-        if not xbmcvfs.exists(d):
-            try:
-                xbmcvfs.mkdirs(d)
-            except Exception:
-                xbmcvfs.mkdir(d)
-        _LOGOS_DIR = d if xbmcvfs.exists(d) else None
-    except Exception:
-        _LOGOS_DIR = None
-    return _LOGOS_DIR
-
-
-def _logo_file(nt):
-    """Chemin local du logo d'une équipe normalisée, ou None."""
-    if not nt:
-        return None
-    d = _logos_dir()
-    if not d:
-        return None
-    try:
-        return os.path.join(d, six.ensure_text(
-            nt, encoding='utf-8', errors='replace') + u'.png')
-    except Exception:
-        return None
-
-
-def _logo_download(url, path):
-    """Télécharge un logo dans le profil. True si un fichier image y est.
-    Les écussons font 5-100 Ko ; timeout court et contrôle du contenu
-    (signature PNG/JPEG/GIF/WEBP) : jamais de fichier parasite."""
-    if not url or not path:
-        return False
-    try:
-        r = requests.get(url, headers={'User-Agent': _LOGO_UA}, timeout=8)
-        data = r.content or b''
-        if r.status_code != 200 or len(data) < 300:
-            return False
-        if not any(data[:4].startswith(m) for m in _IMG_MAGIC):
-            return False
-    except Exception:
-        return False
-    try:
-        f = None
-        for _mode in ('wb', 'w'):
-            try:
-                f = xbmcvfs.File(path, _mode)
-                break
-            except Exception:
-                f = None
-        if f is not None:
-            try:
-                f.write(data)
-            finally:
-                f.close()
-        else:
-            raise Exception('xbmcvfs.File indisponible')
-    except Exception:
-        try:
-            with open(control.translatePath(path), 'wb') as fh:
-                fh.write(data)
-        except Exception:
-            return False
-    try:
-        return bool(xbmcvfs.exists(path))
-    except Exception:
-        return True
-
-
-def _logo_local(nt, url=None):
-    """Chemin local du logo : le fichier s'il existe déjà (cache 30 j,
-    mtime du fichier), sinon téléchargement depuis url. None si impossible
-    — l'appelant retombe alors sur l'URL distante."""
-    path = _logo_file(nt)
-    if not path:
-        return None
-    try:
-        if xbmcvfs.exists(path):
-            try:
-                age = time.time() - xbmcvfs.Stat(path).st_mtime()
-            except Exception:
-                age = 0
-            if age < _ROSTER_TTL:
-                return path
-    except Exception:
-        pass
-    if url and _logo_download(url, path):
-        return path
-    try:
-        if xbmcvfs.exists(path):
-            return path              # périmé mais affichable > rien
-    except Exception:
-        pass
-    return None
-
-
-def _tsdb_lookup(nt, team, sport):
-    """TheSportsDB en arrière-plan : recherche d'équipe filtrée par sport
-    (refuse les faux amis e-sport), nom rapproché par _names_match.
-    Réseau indisponible -> réessai plus tard (pas de négatif).
-    Rend True si une requête TheSportsDB a été faite — le rythme 2,5 s
-    (leur limite stricte) ne s'applique qu'à elles, pas aux simples
-    téléchargements de fichiers (v3.7.24)."""
-    if fastcache is not None:
-        try:
-            hit = fastcache.fget('logo:' + nt, _ROSTER_TTL)
-            if hit is not None:
-                if hit != u'@none':
-                    _logo_local(nt, hit)  # pose le fichier local s'il manque
-                return False
-        except Exception:
-            pass
-    want = _TSDB_SPORT.get(_norm_name(sport)) if sport else None
-    try:
-        r = requests.get(
-            'https://www.thesportsdb.com/api/v1/json/123/searchteams.php?t={0}'.format(
-                quote(team)),
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                                   'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'},
-            timeout=8)
-        teams = (r.json() or {}).get('teams') or []
-    except Exception:
-        return True                 # requête tentée -> respecter le rythme
-    pick = None
-    for t in teams:
-        if want and (t.get('strSport') or '') != want:
-            continue
-        if _names_match(team, t.get('strTeam') or '') >= 2:
-            pick = t
-            break
-    if not pick:
-        for t in teams:
-            if want and (t.get('strSport') or '') != want:
-                continue
-            if _names_match(team, t.get('strTeam') or '') >= 1:
-                pick = t
-                break
-    if pick and pick.get('strBadge'):
-        _logo_store(nt, pick['strBadge'])
-        _logo_local(nt, pick['strBadge'])   # v3.7.24 — fichier local tout de suite
-    elif teams:
-        _logo_store(nt, u'@none')       # cherché et pas trouvé -> négatif
-    return True
-
-
-def _logo_queue_add(team, sport):
-    nt = _norm_name(team)
-    if not nt:
-        return
-    with _LOGO_LOCK:
-        if nt not in [x[0] for x in _LOGO_QUEUE]:
-            _LOGO_QUEUE.append((nt, team, sport or u''))
-        alive = bool(_LOGO_THREAD_ALIVE)
-    if not alive:
-        _logo_thread_start()
-
-
-def _logo_thread_start():
-    with _LOGO_LOCK:
-        if _LOGO_THREAD_ALIVE:
-            return
-        _LOGO_THREAD_ALIVE.append(True)
-
-    def _run():
-        try:
-            while True:
-                with _LOGO_LOCK:
-                    if not _LOGO_QUEUE:
-                        break
-                    nt, team, sport = _LOGO_QUEUE.pop(0)
-                try:
-                    slow = _tsdb_lookup(nt, team, sport)
-                except Exception:
-                    slow = False
-                if slow:
-                    time.sleep(2.5)     # limite TheSportsDB (test key) :
-                                        # les simples téléchargements de
-                                        # fichiers (v3.7.24) n'attendent pas
-        except Exception:
-            pass
-        finally:
-            with _LOGO_LOCK:
-                if _LOGO_THREAD_ALIVE:
-                    _LOGO_THREAD_ALIVE.pop()
-
-    try:
-        t = threading.Thread(target=_run)
-        t.daemon = True
-        t.start()
-    except Exception:
-        with _LOGO_LOCK:
-            if _LOGO_THREAD_ALIVE:
-                _LOGO_THREAD_ALIVE.pop()
-
-
-def _team_logo(team, league=None, sport=None):
-    """Chemin LOCAL du logo d'une équipe, ou URL distante en repli, ou ''
-    (icône de base conservée). Cache 30 j (négatif 7 j). Hors cache :
-    compétition mappée ESPN (requête directe, budget de temps par
-    affichage) sinon file d'attente TheSportsDB en ARRIÈRE-PLAN — jamais
-    dans le fil d'affichage. v3.7.24 : le logo trouvé est téléchargé dans
-    le profil et servi en CHEMIN LOCAL (l'icône distante ne s'affiche pas
-    sur tous les Kodi) ; repli : URL distante (3.7.23)."""
-    if not team or not _team_logos_setting():
-        return ''
-    nt = _norm_name(team)
-    if not nt:
-        return ''
-    if fastcache is not None:
-        try:
-            hit = fastcache.fget('logo:' + nt, _ROSTER_TTL)
-            if hit is not None:
-                if hit == u'@none':
-                    return ''
-                # v3.7.24 — le fichier local d'abord : il s'affiche toujours
-                path = _logo_file(nt)
-                if path and xbmcvfs.exists(path):
-                    return path
-                if _LOGO_INLINE_BUDGET[0] < 2.5:
-                    t0 = time.time()
-                    local = _logo_local(nt, hit)
-                    _LOGO_INLINE_BUDGET[0] += time.time() - t0
-                    if local:
-                        return local
-                _logo_queue_add(team, sport)   # fond : pose le fichier
-                return hit                     # repli : URL distante (3.7.23)
-        except Exception:
-            pass
-    slug = _espn_slug_for_league(league)
-    if slug and _LOGO_INLINE_BUDGET[0] < 2.5:
-        t0 = time.time()
-        roster = _espn_roster(slug)
-        _LOGO_INLINE_BUDGET[0] += time.time() - t0
-        if roster:
-            best, best_s = None, 0
-            for _rn, (_disp, href) in roster.items():
-                sc = _names_match(team, _rn)
-                if sc > best_s:
-                    best, best_s = href, sc
-            if best:
-                _logo_store(nt, best)
-                t1 = time.time()
-                local = _logo_local(nt, best)
-                _LOGO_INLINE_BUDGET[0] += time.time() - t1
-                if local:
-                    return local
-                return best        # repli : URL distante (3.7.23)
-    _logo_queue_add(team, sport)
-    return ''
 
 
 def get_events(url):  # 5
@@ -1137,21 +679,10 @@ def get_events(url):  # 5
         events = sorted(event_list, key=lambda x: x[1])
     ctx_refresh = [(u'Actualiser la grille',
                     'RunPlugin({0}?mode=refresh_events)'.format(_url))]
-    _LOGO_INLINE_BUDGET[0] = 0.0    # v3.7.23 — budget ESPN de CET affichage
     for event in deduplicate_events(events):
         streams = str(quote(base64.b64encode(six.ensure_binary(str(event[2])))))
         name = event[0]
-        icon = event[3]
-        # v3.7.23 — logo de l'équipe 1, sinon de l'équipe 2, sinon icône de
-        # base (ou team1Img de la source si un jour elle revient) ; jamais de
-        # requête bloquante hors compétitions ESPN mappées (budget 2,5 s).
-        try:
-            _logo = _team_logo(event[6], event[8], event[4]) \
-                or _team_logo(event[7], event[8], event[4])
-            if _logo:
-                icon = _logo
-        except Exception:
-            pass
+        icon = event[3]     # v3.7.26 — icône de base (logos supprimés)
         addDir(name, streams, 'get_streams', icon, FANART, isFolder=True,
                infoLabels=event[5], context=ctx_refresh)
 
@@ -1645,7 +1176,7 @@ def get_stream(name, url):  # 4
             # v3.7.22/3.7.23 — pré-résolution en ARRIÈRE-PLAN : du dernier
             # lien qui a marché pour ce match s'il est connu (re-clic
             # instantané), sinon du premier lien affiché. Le flux est prêt
-            # (cache 3 min) avant même le clic.
+            # (cache 10 min) avant même le clic.
             _prewarm_link(name, _last_good_link(links_all) or links_all[0])
             xbmcplugin.setContent(_handle, 'videos')
             xbmcplugin.endOfDirectory(_handle)
@@ -1821,7 +1352,8 @@ def _resolve2_impl(name, url, quiet=False):
             # tout le monde — un serveur à 8 s aurait retardé un gagnant
             # répondu en 1 s).
             pick, _pidx = fastcache.first_ready(
-                [lambda h=h: _phase2(h) for h in hosts], workers=4, max_wait=12)
+                [lambda h=h: _phase2(h) for h in hosts],
+                 workers=4, max_wait=8)  # v3.7.26 — 8 s (bon miroir : 0,3-1 s)
         else:
             phase2 = [_phase2(h) for h in hosts]
             pick = next((r for r in phase2 if r), None)
@@ -2036,7 +1568,7 @@ def _resolve2_impl(name, url, quiet=False):
                         # répond gagne, sans attendre les serveurs lents.
                         working, _pi = fastcache.first_ready(
                             [lambda u=u: _probe(u) for u in candidates],
-                            workers=4, max_wait=10)
+                            workers=4, max_wait=6)   # v3.7.26 — sondes CDN : 6 s
                     else:
                         working = None
                         for u in candidates:
@@ -2114,14 +1646,14 @@ def _resolve2_impl(name, url, quiet=False):
 
 # ---------------------------------------------------------------------------
 # v3.7.22 — vitesse d'ouverture des vidéos
-#   • cache « res: » (3 min) du flux résolu : un 2e clic (mauvais miroir,
+#   • cache « res: » (10 min) du flux résolu : un 2e clic (mauvais miroir,
 #     reprise après coupure) ne re-résout plus rien ;
 #   • pré-résolution en arrière-plan du 1er lien dès l'affichage de la liste
 #     des liens du match : le flux est prêt avant même le clic ;
 #   • bascule automatique sur le lien suivant quand le lien cliqué est mort
 #     (paquet {"l": [liens], "i": rang} porté par chaque entrée de lecture).
 # ---------------------------------------------------------------------------
-_RES_TTL = 180              # durée (s) du cache du flux résolu
+_RES_TTL = 600              # durée (s) du cache du flux résolu (v3.7.26 : 10 min)
 _RES_INFLIGHT = set()       # pré-résolutions déjà en cours (anti-doublon)
 _RES_LOCK = threading.Lock()
 
@@ -2225,7 +1757,7 @@ def _play_order(links, idx, auto_next):
 
 
 def _resolve2_cached(name, link, quiet=False):
-    """Résolution avec cache « res: » (3 min). Les en-têtes étant inclus
+    """Résolution avec cache « res: » (10 min). Les en-têtes étant inclus
     dans l'URL finale (convention Kodi « url|Referer=… »), le flux en cache
     est jouable tel quel."""
     ck = 'res:' + link
@@ -2808,7 +2340,7 @@ def router(paramstring):
                     fastcache._items = None   # sera rechargé au prochain accès
             except Exception:
                 pass
-            # v3.7.24 — les logos téléchargés font partie des données
+            # v3.7.26 — dossier logos/ des anciennes versions (≤ 3.7.25)
             try:
                 import os as _os
                 _lg = _os.path.join(ADDON_DATA, 'logos')

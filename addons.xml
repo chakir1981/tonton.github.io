@@ -41,7 +41,7 @@
         <platform>all</platform>
     </extension>
 </addon>
-	<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.25" provider-name="chakir1981">
+	<addon id="plugin.video.sporthdme" name="SportHD" version="3.7.26" provider-name="chakir1981">
   <requires>
     <!--import addon="xbmc.python" version="2.1.0"/-->
     <import addon="script.module.dateutil" />
@@ -58,6 +58,10 @@
           <language>EN</language>
     <license>GNU GPL, version 2</license>
     <news>
+      [B]v3.7.26[/B] 03/11/2026
+- LOGOS SUPPRIMÉS (demande utilisateur : « fais aussi la suppression des logos ») : tout le code des écussons (ESPN + TheSportsDB + téléchargement dans le profil + réglage « Afficher les logos des équipes ») est retiré. La liste des matchs s'ouvre plus vite : plus de requête bloquante au premier passage d'une compétition (jusqu'à 2,5 s économisés) et plus de fil d'arrière-plan qui consommait réseau et batterie. Chaque match affiche l'icône de l'add-on. « Vider les données » supprime toujours le dossier logos des anciennes versions.
+- OUVERTURE DES LIENS PLUS RAPIDE : l'attente maximale sur un lien mort passe de 12 s à 8 s (miroirs) et de 10 s à 6 s (sondes) — un lien qui marche répond en 0,3-1 s, donc la bascule automatique sur le lien suivant arrive environ 2 fois plus vite. Le flux résolu reste prêt en cache 10 minutes au lieu de 3 : reprendre un match reste instantané plus longtemps.
+- Rien d'autre ne change : mêmes matchs, mêmes liens d'origine du guide, pastille « dans X min » et mémoire du lien (3.7.23), rattachement par chaîne et mode dégradé (3.7.25) intacts, verrous 3.7.20/3.7.21 conservés, toujours SANS aucun lien ajouté.
       [B]v3.7.25[/B] 03/11/2026
 - MOINS DE MATCHS « VIDES » (rattachement de secours par chaîne) : quand la grille affiche un match avec ses chaînes mais que le guide n'y a mis AUCUN lien, l'add-on reprend les liens de CES MÊMES chaînes tels que la grille les porte sur les autres matchs (vérifié : le même canal porte toujours les mêmes liens sur toute la grille — 54 canaux contrôlés, 0 divergence). Zéro requête de plus (la grille est déjà sur le disque) et AUCUN lien ajouté : on ne fait que ré-attacher ce que le guide lui-même a déjà associé à ces chaînes. Le filtre « Uniquement les sources françaises » reste respecté.
 - PLUS JAMAIS DE GRILLE VIDE SI LE GUIDE CHANGE (mode dégradé « rapprochement par titre ») : si le site du guide modifie sa structure (les deux lectures normales échouent), l'add-on relit les mêmes données de façon permissive et RECONSTRUIT lui-même les paires match ↔ chaînes (équipes, heure, langues) au lieu d'afficher « Aucun match programmé ». Tout ce qui est affiché vient du guide — rien d'extérieur, rien d'ajouté.
