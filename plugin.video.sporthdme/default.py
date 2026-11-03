@@ -890,11 +890,16 @@ def _resolve2_impl(name, url, quiet=False):
             return None
 
         if fastcache is not None:
-            phase2 = fastcache.map_calls([lambda h=h: _phase2(h) for h in hosts],
-                                         workers=4)
+            # v3.7.22 — « premier prêt » : à chaque instant, le meilleur
+            # classé parmi les miroirs qui ONT RÉPONDU gagne ; un miroir
+            # muet/lent ne retarde plus les autres (map_calls, lui, attend
+            # tout le monde — un serveur à 8 s aurait retardé un gagnant
+            # répondu en 1 s).
+            pick, _pidx = fastcache.first_ready(
+                [lambda h=h: _phase2(h) for h in hosts], workers=4, max_wait=12)
         else:
             phase2 = [_phase2(h) for h in hosts]
-        pick = next((r for r in phase2 if r), None)
+            pick = next((r for r in phase2 if r), None)
         flink = None
         frame = None
         if pick:
@@ -1102,9 +1107,11 @@ def _resolve2_impl(name, url, quiet=False):
                         return None
 
                     if fastcache is not None:
-                        probed = fastcache.map_calls(
-                            [lambda u=u: _probe(u) for u in candidates], workers=4)
-                        working = next((u for u in probed if u), None)
+                        # v3.7.22 — « premier prêt » : la première sonde qui
+                        # répond gagne, sans attendre les serveurs lents.
+                        working, _pi = fastcache.first_ready(
+                            [lambda u=u: _probe(u) for u in candidates],
+                            workers=4, max_wait=10)
                     else:
                         working = None
                         for u in candidates:

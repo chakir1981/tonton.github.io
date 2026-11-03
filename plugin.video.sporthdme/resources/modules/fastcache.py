@@ -18,6 +18,10 @@ API :
     flush()                 -> force l'écriture disque
     parallel_map(fn, items) -> exécute fn(item) pour chaque item en parallèle
     run_jobs(fns)           -> exécute chaque callable en parallèle
+    map_calls(fns)          -> chaque callable() en parallèle, tous résultats
+    first_ready(fns)        -> (résultat, index) du PREMIER callable qui
+                               rend une valeur vraie — les lents n'attardent
+                               pas les rapides (v3.7.22)
 
 Toute panne (disque plein, JSON corrompu) est silencieuse : l'add-on
 fonctionne comme avant, juste sans cache persistant.
@@ -244,6 +248,92 @@ def map_calls(fns, workers=3):
         return out
 
 
+def first_ready(fns, workers=4, tick=0.1, max_wait=12.0):
+    """Lance chaque callable en parallèle et rend (resultat, index) du
+    premier qui produit une valeur VRAIE.
+
+    À chaque instant, le meilleur classé (ordre de la liste) parmi les
+    callables DÉJÀ TERMINÉS gagne ; un callable qui finit sans résultat
+    n'arrête pas l'attente. On rend la main dès qu'un résultat utile
+    arrive, que tous aient fini (échec général) ou après max_wait
+    (rend (None, -1)). Contrairement à map_calls, un appel lent ne
+    retarde pas la réponse d'un rapide.
+
+    Usage : salve de miroirs/sondes — la première réponse UTILE dans
+    l'ordre de priorité, sans attendre les miroirs muets.
+    """
+    fns = list(fns or [])
+    if not fns:
+        return None, -1
+    if len(fns) == 1 or workers <= 1:
+        for i, fn in enumerate(fns):
+            try:
+                r = fn()
+            except Exception:
+                r = None
+            if r:
+                return r, i
+        return None, -1
+
+    out = [None] * len(fns)
+    done = [False] * len(fns)
+    deadline = time.time() + max_wait
+
+    try:
+        from concurrent.futures import ThreadPoolExecutor
+        ex = ThreadPoolExecutor(max_workers=min(workers, len(fns)))
+        try:
+            futs = [ex.submit(_safe(f)) for f in fns]
+            while time.time() < deadline:
+                alive = False
+                for i, f in enumerate(futs):
+                    if done[i]:
+                        continue
+                    if f.done():
+                        done[i] = True
+                        out[i] = f.result()
+                    else:
+                        alive = True
+                # priorité : le meilleur classé parmi les terminés gagne
+                for i in range(len(futs)):
+                    if done[i] and out[i]:
+                        return out[i], i
+                if not alive:
+                    break
+                time.sleep(tick)
+        finally:
+            try:
+                ex.shutdown(wait=False)
+            except Exception:
+                pass
+    except ImportError:
+        # python 2 / Kodi 18 : threads bruts + polling sur liste partagée
+        def _one(i, f):
+            try:
+                out[i] = f()
+            except Exception:
+                out[i] = None
+            done[i] = True
+
+        threads = [threading.Thread(target=_one, args=(i, f))
+                   for i, f in enumerate(fns)]
+        for t in threads:
+            t.daemon = True
+            t.start()
+        while time.time() < deadline:
+            for i in range(len(fns)):
+                if done[i] and out[i]:
+                    return out[i], i
+            if all(done):
+                break
+            time.sleep(tick)
+
+    for i in range(len(fns)):
+        if done[i] and out[i]:
+            return out[i], i
+    return None, -1
+
+
 def _safe(fn):
     def run(*a, **k):
         try:
@@ -298,5 +388,36 @@ if __name__ == '__main__':
         return x * 10
     res = map_calls([lambda: _v(1), lambda: _v(2), lambda: _v(3)], workers=3)
     assert res == [10, None, 30], res
-    print('fastcache self-test: OK (%.2f s parallèle, fichier %s)'
-          % (dt, _PATH))
+    # first_ready : le premier UTILE gagne, un lent/muet n'attarde pas
+    r, i = first_ready([], workers=3)
+    assert (r, i) == (None, -1)
+    r, i = first_ready([lambda: 'seul'], workers=1)
+    assert (r, i) == ('seul', 0)
+    def _neg1():
+        time.sleep(0.02); return None
+    def _rapide():
+        time.sleep(0.05); return 'rapide'
+    def _lent():
+        time.sleep(1.2); return 'lent'
+    t0 = time.time()
+    r, i = first_ready([_neg1, _rapide, _lent], workers=3, max_wait=5)
+    dtfr = time.time() - t0
+    assert (r, i) == ('rapide', 1), (r, i)
+    assert dtfr < 0.8, 'first_ready a attendu le lent: %.2f s' % dtfr
+    # priorité : plusieurs prêts au même tick -> le mieux classé gagne
+    def _a():
+        time.sleep(0.15); return 'A'
+    def _b():
+        time.sleep(0.10); return 'B'
+    r, i = first_ready([_a, _b], workers=2, max_wait=5, tick=0.2)
+    assert (r, i) == ('A', 0), (r, i)      # A et B finis au tick 0.2 -> A
+    # tous négatifs -> (None, -1) dès que tout le monde a fini
+    r, i = first_ready([_neg1, _neg1], workers=2, max_wait=5)
+    assert (r, i) == (None, -1), (r, i)
+    # échec (exception) = pas de résultat, pas de crash
+    def _boom():
+        raise RuntimeError
+    r, i = first_ready([_boom, _neg1], workers=2, max_wait=2)
+    assert (r, i) == (None, -1), (r, i)
+    print('fastcache self-test: OK (%.2f s parallèle, first_ready %.2f s, fichier %s)'
+          % (dt, dtfr, _PATH))
